@@ -5,7 +5,16 @@
 Close the lid and watch your screen content tilt, blur, and fade as it moves.
 Mac Duo adds this effect to your MacBook, with controls in the menu bar.
 
+With the default settings, it's recommended to view the effect in front of your MacBook.
+
+- **Metal rendering:** Uses GPU rendering to apply perspective, blur, and dimming as the lid closes.
+- **Live screen content:** Uses ScreenCaptureKit to capture and render screen content in real time.
+- **Adjustable perspective:** Tweak the perspective to suit your viewing position and make the effect look more natural.
+
 https://github.com/user-attachments/assets/e0fda9dc-a75c-4950-a14d-d67412e0da24
+
+> [!NOTE]
+> Mac Duo is completely **free** to use. Whether you use the app or reuse its code in your projects, please consider [sponsoring me](https://github.com/sponsors/sumimakito) if you find it helpful.
 
 ## Download
 
