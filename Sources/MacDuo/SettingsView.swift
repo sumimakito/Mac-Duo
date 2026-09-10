@@ -8,6 +8,7 @@ struct SettingsView: View {
 
     @State private var launchesAtLogin = SMAppService.mainApp.status == .enabled
     @State private var hasScreenPermission = CGPreflightScreenCaptureAccess()
+    @State private var settingsOpenFailed = false
 
     var onQuit: () -> Void
 
@@ -15,6 +16,9 @@ struct SettingsView: View {
     private static let inset: CGFloat = 14
     private static let bodyHeight: CGFloat = 400
     private static let authorURL = URL(string: "https://github.com/sumimakito")!
+    private static let screenRecordingSettingsURL = URL(
+        string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_ScreenCapture"
+    )!
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -51,6 +55,9 @@ struct SettingsView: View {
         }
         .frame(width: Self.width)
         .onAppear { hasScreenPermission = CGPreflightScreenCaptureAccess() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            hasScreenPermission = CGPreflightScreenCaptureAccess()
+        }
     }
 
     private var header: some View {
@@ -197,20 +204,31 @@ struct SettingsView: View {
             Text("Screen Recording permission is required to show the depth effect.")
                 .font(.callout)
                 .fixedSize(horizontal: false, vertical: true)
-            HStack {
-                Button("Request Permission") {
-                    controller.snapshotter.requestPermission()
-                    hasScreenPermission = CGPreflightScreenCaptureAccess()
-                }
-                Button("Open System Settings") {
-                    let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!
-                    NSWorkspace.shared.open(url)
-                }
+            Button("Open System Settings") {
+                openScreenRecordingSettings()
             }
             .controlSize(.small)
+            if settingsOpenFailed {
+                Text("Could not open System Settings. Open it manually and enable screen recording for Mac Duo under Privacy & Security.")
+                    .font(.caption)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .padding(10)
         .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func openScreenRecordingSettings() {
+        settingsOpenFailed = false
+        Task { @MainActor in
+            do {
+                let configuration = NSWorkspace.OpenConfiguration()
+                configuration.activates = true
+                _ = try await NSWorkspace.shared.open(Self.screenRecordingSettingsURL, configuration: configuration)
+            } catch {
+                settingsOpenFailed = true
+            }
+        }
     }
 
     private func group<Content: View>(

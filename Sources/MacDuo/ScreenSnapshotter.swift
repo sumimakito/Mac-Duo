@@ -37,11 +37,6 @@ final class ScreenSnapshotter {
 
     var hasPermission: Bool { CGPreflightScreenCaptureAccess() }
 
-    /// Shows the system prompt. Later calls do nothing.
-    func requestPermission() {
-        CGRequestScreenCaptureAccess()
-    }
-
     func beginPrewarm(interval: TimeInterval = 0.2) {
         guard timer == nil else { return }
         capture()
