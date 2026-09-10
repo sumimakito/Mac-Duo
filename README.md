@@ -18,7 +18,9 @@ https://github.com/user-attachments/assets/e0fda9dc-a75c-4950-a14d-d67412e0da24
 
 ## Download
 
-Download link: to be added.
+[Download DMG](https://github.com/sumimakito/Mac-Duo/releases/download/dev/Mac-Duo-dev.dmg) | [Download ZIP](https://github.com/sumimakito/Mac-Duo/releases/download/dev/Mac-Duo-dev.zip)
+
+These downloads contain the latest [development build](https://github.com/sumimakito/Mac-Duo/releases/tag/dev) for Apple Silicon and Intel Macs.
 
 Requires macOS 14 or later and a MacBook with a compatible lid angle sensor.
 Grant Screen Recording permission when prompted to enable the effect.
