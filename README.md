@@ -1,11 +1,19 @@
+<div align="center">
+
 # Mac Duo
 
 **Wish you could bring the iPhone Duo effect to your MacBook?**
 
+https://github.com/user-attachments/assets/3ea3b098-c6d2-4398-8f3a-e9087bbb33f2
+
 Close the lid and watch your screen content tilt, blur, and fade as it moves.
 Mac Duo adds this effect to your MacBook, with controls in the menu bar.
 
-![Menu](./assets/menu.png)
+<img src="./assets/menu.png" width="300" alt="Mac Duo menu">
+
+</div>
+
+<hr>
 
 With the default settings, it's recommended to view the effect in front of your MacBook.
 
@@ -13,10 +21,11 @@ With the default settings, it's recommended to view the effect in front of your 
 - **Live screen content:** Uses ScreenCaptureKit to capture and render screen content in real time.
 - **Adjustable perspective:** Tweak the perspective to suit your viewing position and make the effect look more natural.
 
-https://github.com/user-attachments/assets/e0fda9dc-a75c-4950-a14d-d67412e0da24
 
 > [!NOTE]
 > Mac Duo is completely **free** to use. Whether you use the app or reuse its code in your projects, please consider [sponsoring me](https://github.com/sponsors/sumimakito) if you find it helpful.
+>
+> Special thanks to our team at [Moeru AI](https://github.com/moeru-ai) for sponsoring the Apple Developer Program membership used to sign and notarize the prebuilt app here.
 
 ## Download
 
