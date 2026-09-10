@@ -37,6 +37,7 @@ rm -rf "$BUNDLE"
 mkdir -p "$BUNDLE/Contents/MacOS" "$BUNDLE/Contents/Resources"
 cp "$BINARY" "$BUNDLE/Contents/MacOS/MacDuo"
 cp Resources/Info.plist "$BUNDLE/Contents/Info.plist"
+cp LICENSE NOTICE "$BUNDLE/Contents/Resources/"
 if [ -f Resources/AppIcon.icns ]; then
   cp Resources/AppIcon.icns "$BUNDLE/Contents/Resources/AppIcon.icns"
 fi

@@ -39,4 +39,6 @@ macOS may require Screen Recording permission again after rebuilding with ad-hoc
 
 ## License
 
-License: to be decided.
+Licensed under the [Apache License 2.0](LICENSE). Copyright 2026 Makito.
+
+See [NOTICE](NOTICE) for attribution.
