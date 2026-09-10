@@ -1,0 +1,6 @@
+.build/
+build/
+.DS_Store
+*.xcuserstate
+.swiftpm/
+.claude/work/

@@ -1,0 +1,44 @@
+# Mac Duo
+
+**Wish you could bring the iPhone Duo effect to your MacBook?**
+
+Close the lid and watch your screen content tilt, blur, and fade as it moves.
+Mac Duo adds this effect to your MacBook, with controls in the menu bar.
+
+```
+Demo video: to be added.
+```
+
+## Download
+
+Download link: to be added.
+
+Requires macOS 14 or later and a MacBook with a compatible lid angle sensor.
+Grant Screen Recording permission when prompted to enable the effect.
+
+## Build
+
+Requires Xcode with Swift 6.0 or later. Run from the project directory:
+
+```sh
+./build.sh
+```
+
+The script creates `build/Mac Duo.app` with an ad-hoc signature. Open it from Finder, or build and launch with:
+
+```sh
+./build.sh --run
+```
+
+macOS may require Screen Recording permission again after rebuilding with ad-hoc signing.
+
+## Known limitations
+
+- Only MacBooks with a compatible lid angle sensor can use the effect. The app reports when no sensor is available.
+- The effect applies only to the built-in display.
+- The effect stops when macOS sleeps as the lid closes.
+- Clicks pass through the effect to the apps underneath.
+
+## License
+
+License: to be decided.

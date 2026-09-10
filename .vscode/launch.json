@@ -1,0 +1,44 @@
+{
+	"configurations": [
+		{
+			"type": "swift",
+			"request": "launch",
+			"args": [],
+			"cwd": "${workspaceFolder:Mac-Duo}",
+			"name": "Debug lidprobe",
+			"target": "lidprobe",
+			"configuration": "debug",
+			"preLaunchTask": "swift: Build Debug lidprobe"
+		},
+		{
+			"type": "swift",
+			"request": "launch",
+			"args": [],
+			"cwd": "${workspaceFolder:Mac-Duo}",
+			"name": "Release lidprobe",
+			"target": "lidprobe",
+			"configuration": "release",
+			"preLaunchTask": "swift: Build Release lidprobe"
+		},
+		{
+			"type": "swift",
+			"request": "launch",
+			"args": [],
+			"cwd": "${workspaceFolder:Mac-Duo}",
+			"name": "Debug MacDuo",
+			"target": "MacDuo",
+			"configuration": "debug",
+			"preLaunchTask": "swift: Build Debug MacDuo"
+		},
+		{
+			"type": "swift",
+			"request": "launch",
+			"args": [],
+			"cwd": "${workspaceFolder:Mac-Duo}",
+			"name": "Release MacDuo",
+			"target": "MacDuo",
+			"configuration": "release",
+			"preLaunchTask": "swift: Build Release MacDuo"
+		}
+	]
+}
