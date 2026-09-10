@@ -6,10 +6,10 @@
 
 https://github.com/user-attachments/assets/3ea3b098-c6d2-4398-8f3a-e9087bbb33f2
 
-Close the lid and watch your screen content tilt, blur, and fade as it moves.
+Close the lid and watch your screen content tilt, blur, and fade as it moves.  
 Mac Duo adds this effect to your MacBook, with controls in the menu bar.
 
-<img src="./assets/menu.png" width="300" alt="Mac Duo menu">
+<img src="./assets/menu.png" width="400" alt="Mac Duo menu">
 
 </div>
 
@@ -58,6 +58,10 @@ macOS may require Screen Recording permission again after rebuilding with ad-hoc
 - The effect applies only to the built-in display.
 - The effect stops when macOS sleeps as the lid closes.
 - Clicks pass through the effect to the apps underneath.
+
+## Acknowledgements
+
+This project is built with AI assistance.
 
 ## License
 
