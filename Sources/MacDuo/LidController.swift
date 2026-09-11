@@ -24,6 +24,11 @@ final class LidController: ObservableObject {
 
     let snapshotter = ScreenSnapshotter()
 
+    /// The picture source selected for the current effect run.
+    private var isPresentingLivePicture = false
+    /// Invalidates screenshot continuations from an earlier run or source.
+    private var pictureGeneration: UInt64 = 0
+
     private let preferences: Preferences
     private let sensor = LidAngleSensor()
     private let overlay = DepthOverlay()
@@ -145,9 +150,7 @@ final class LidController: ObservableObject {
     }
 
     private func stopEffectAndCapture() {
-        pictureTask?.cancel()
-        pictureTask = nil
-        isCapturePending = false
+        invalidatePictureRequests()
         stopDisplayLink()
         overlay.dismiss(animated: false)
         snapshotter.stop()
@@ -270,6 +273,10 @@ final class LidController: ObservableObject {
             setActive(wanted)
             return
         }
+        if isActive, isPresentingLivePicture != preferences.isLivePicture {
+            switchPictureSource()
+            return
+        }
         if isActive {
             if !overlay.isVisible, !isCapturePending { presentPicture() }
             // A visible overlay with no link would sit at its first frame.
@@ -346,11 +353,13 @@ final class LidController: ObservableObject {
 
     private func setActive(_ active: Bool) {
         isActive = active
+        invalidatePictureRequests()
         if active {
             startedAt = CACurrentMediaTime()
             visualAngle.reset(to: rawAngle)
             snapshotter.endPrewarm()
             setPollInterval(Self.activePollInterval)
+            isPresentingLivePicture = preferences.isLivePicture
             presentPicture()
         } else {
             stopDisplayLink()
@@ -367,7 +376,7 @@ final class LidController: ObservableObject {
     /// already running counts as that wait.
     private func presentPicture() {
         guard preferences.isEnabled, !isSuspended, isActive else { return }
-        if preferences.isLivePicture, let screen = NSScreen.builtIn,
+        if isPresentingLivePicture, let screen = NSScreen.builtIn,
            overlay.showLive(
                on: screen,
                startAngle: preferences.thresholdAngle,
@@ -396,12 +405,16 @@ final class LidController: ObservableObject {
             show(image: image, on: screen)
             return
         }
+        let generation = pictureGeneration
+        let expectedLivePicture = isPresentingLivePicture
         isCapturePending = true
         pictureTask?.cancel()
         pictureTask = Task { [weak self] in
             guard let self, !Task.isCancelled else { return }
             await self.snapshotter.captureOnce()
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled,
+                  generation == self.pictureGeneration,
+                  expectedLivePicture == self.isPresentingLivePicture else { return }
             self.pictureTask = nil
             self.isCapturePending = false
             Diagnostics.lid.notice(
@@ -417,16 +430,35 @@ final class LidController: ObservableObject {
         }
     }
 
+    /// Applies a picture-source setting change to the effect already on screen.
+    private func switchPictureSource() {
+        isPresentingLivePicture = preferences.isLivePicture
+        invalidatePictureRequests()
+        Diagnostics.lid.notice(
+            "switch picture source to \(self.isPresentingLivePicture ? "live" : "still", privacy: .public)"
+        )
+        stopDisplayLink()
+        overlay.dismiss(animated: false)
+        streamer.stop()
+        overlay.discardLive()
+        if isPresentingLivePicture { streamer.start() }
+        presentPicture()
+    }
+
     /// Takes one screenshot to start a live overlay that has nothing to show
     /// yet. A stream frame that lands first makes it unnecessary.
     private func requestSeed() {
+        let generation = pictureGeneration
+        let expectedLivePicture = isPresentingLivePicture
         isCapturePending = true
         let started = CACurrentMediaTime()
         pictureTask?.cancel()
         pictureTask = Task { [weak self] in
             guard let self, !Task.isCancelled else { return }
             await self.snapshotter.captureOnce()
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled,
+                  generation == self.pictureGeneration,
+                  expectedLivePicture == self.isPresentingLivePicture else { return }
             self.pictureTask = nil
             self.isCapturePending = false
             Diagnostics.lid.notice(
@@ -440,6 +472,13 @@ final class LidController: ObservableObject {
                   let image = self.snapshotter.latestImage else { return }
             self.overlay.seed(image: image)
         }
+    }
+
+    private func invalidatePictureRequests() {
+        pictureTask?.cancel()
+        pictureTask = nil
+        pictureGeneration &+= 1
+        isCapturePending = false
     }
 
     private func show(image: CGImage, on screen: NSScreen) {
