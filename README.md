@@ -36,6 +36,13 @@ These downloads contain the latest [development build](https://github.com/sumima
 Requires macOS 14 or later and a MacBook with a compatible lid angle sensor.
 Grant Screen Recording permission when prompted to enable the effect.
 
+## Language
+
+The menu bar settings support English and Simplified Chinese. Use the **中文 / English**
+button next to **Language / 语言** to switch immediately. The initial language follows
+your system preference; your selection is remembered across launches and is kept when
+resetting effect settings.
+
 ## Build
 
 Requires Xcode with Swift 6.0 or later. Run from the project directory:
