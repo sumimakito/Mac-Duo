@@ -3,7 +3,6 @@ import CoreVideo
 import Metal
 import ScreenCaptureKit
 
-///
 /// Frames are `IOSurface` backed, so wrapping one as a texture copies nothing.
 /// `startCapture` takes long enough that the stream has to be started while
 /// the lid is still closing rather than at the trigger angle.
