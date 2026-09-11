@@ -50,6 +50,19 @@ final class LidController: ObservableObject {
     private var isSuspended = false
     private var isCapturePending = false
     private var lastMovedDownTime: CFTimeInterval = -.greatestFiniteMagnitude
+    /// Where the lid last moved to by more than `timeoutMovementThreshold`,
+    /// and when. The timeout counts from there.
+    private var timeoutReferenceAngle: Double?
+    private var timeoutReferenceTime: CFTimeInterval = 0
+    /// Set when the timeout ends the effect, cleared once the lid rises back
+    /// above the threshold. Closing further from the same resting spot must
+    /// not retrigger it.
+    private var timeoutAwaitingRelease = false
+    /// The setting as last seen, so flipping it drops stale tracking.
+    private var wasTimeoutEnabled = false
+    /// True while `beginClosingOut()` is easing the picture back to flat.
+    private var isClosingOut = false
+    private var closingOutStartedAt: CFTimeInterval = 0
     private var builtInLayout = Layout()
 
     private static let idlePollInterval: TimeInterval = 1.0 / 8
@@ -73,6 +86,21 @@ final class LidController: ObservableObject {
     /// The overlay stays up at least this long. A prediction can fire while the
     /// last reading is still above the release angle.
     private static let minimumEffectDuration: TimeInterval = 0.35
+
+    /// Movement within this many degrees counts as holding still.
+    private static let timeoutMovementThreshold: Double = 2
+
+    /// How long the lid has to hold still before the timeout ends the effect.
+    private static let timeoutStillDuration: TimeInterval = 2
+
+    /// How close the eased angle must get to flat before the last frame
+    /// snaps there. Half a degree short, the dim curve still darkens the top
+    /// of the picture by several percent, and the fade would then reveal a
+    /// brighter screen underneath.
+    private static let closingOutSettleEpsilon: Double = 0.05
+
+    /// Safety cap, in case the spring never quite settles.
+    private static let closingOutMaxDuration: TimeInterval = 1.2
 
     /// A scripted angle sweep, so the settings panel can show the effect
     /// without the lid moving. It feeds the same path the sensor feeds.
@@ -148,6 +176,7 @@ final class LidController: ObservableObject {
         pictureTask?.cancel()
         pictureTask = nil
         isCapturePending = false
+        isClosingOut = false
         stopDisplayLink()
         overlay.dismiss(animated: false)
         snapshotter.stop()
@@ -240,17 +269,48 @@ final class LidController: ObservableObject {
     }
 
     /// Whether the picture belongs on screen for this angle. It widens the
-    /// angle for release and keeps a lid held below the angle showing.
+    /// angle for release and keeps a lid held below the angle showing, unless
+    /// the timeout ends it first.
     private func wantsEffect(angle: Double) -> Bool {
         guard preferences.isEnabled else { return false }
+        if preferences.isTimeoutEnabled != wasTimeoutEnabled {
+            timeoutReferenceAngle = nil
+            timeoutAwaitingRelease = false
+            wasTimeoutEnabled = preferences.isTimeoutEnabled
+        }
+
         let threshold = preferences.thresholdAngle
         if isActive {
             guard CACurrentMediaTime() - startedAt > Self.minimumEffectDuration else { return true }
-            return angle < threshold + preferences.hysteresis
+            if angle >= threshold + preferences.hysteresis { return false }
+            if preferences.isTimeoutEnabled, isPastTimeout(angle: angle) {
+                timeoutAwaitingRelease = true
+                return false
+            }
+            return true
         }
+
+        if preferences.isTimeoutEnabled, timeoutAwaitingRelease {
+            guard angle >= threshold else { return false }
+            timeoutAwaitingRelease = false
+        }
+
         // A lid resting below the angle must not start by itself.
         let closing = CACurrentMediaTime() - lastMovedDownTime < Self.closingMemory
         return closing && predictedAngle() <= threshold
+    }
+
+    /// True once the angle has held within `timeoutMovementThreshold` of its
+    /// last significant position for `timeoutStillDuration`.
+    private func isPastTimeout(angle: Double) -> Bool {
+        let now = CACurrentMediaTime()
+        if let reference = timeoutReferenceAngle,
+           abs(angle - reference) <= Self.timeoutMovementThreshold {
+            return now - timeoutReferenceTime >= Self.timeoutStillDuration
+        }
+        timeoutReferenceAngle = angle
+        timeoutReferenceTime = now
+        return false
     }
 
     /// Brings the screen in line with `wantsEffect` on every sample. A run
@@ -274,7 +334,9 @@ final class LidController: ObservableObject {
             if !overlay.isVisible, !isCapturePending { presentPicture() }
             // A visible overlay with no link would sit at its first frame.
             if overlay.isVisible, displayLink == nil { startDisplayLink() }
-        } else {
+        } else if !isClosingOut {
+            // The ease back to flat still draws the live picture, and this
+            // would free it.
             updatePrewarm(angle: angle, ceiling: preferences.thresholdAngle + preferences.prewarmCeiling)
         }
     }
@@ -347,16 +409,41 @@ final class LidController: ObservableObject {
     private func setActive(_ active: Bool) {
         isActive = active
         if active {
+            isClosingOut = false
             startedAt = CACurrentMediaTime()
+            if preferences.isTimeoutEnabled {
+                timeoutReferenceAngle = rawAngle
+                timeoutReferenceTime = startedAt
+            }
             visualAngle.reset(to: rawAngle)
             snapshotter.endPrewarm()
             setPollInterval(Self.activePollInterval)
             presentPicture()
         } else {
+            snapshotter.discard()
+            timeoutReferenceAngle = nil
+            beginClosingOut()
+        }
+    }
+
+    /// Eases the picture back to flat before the overlay fades away. Ending
+    /// the effect with the lid still shut would otherwise fade out a warped
+    /// picture. `step(_:)` drives the ease and calls `finishClosingOut()`.
+    private func beginClosingOut() {
+        // Nothing to ease before the picture is up, or with no link to draw it.
+        guard overlay.isVisible, displayLink != nil else {
             stopDisplayLink()
             overlay.dismiss(animated: true)
-            snapshotter.discard()
+            return
         }
+        isClosingOut = true
+        closingOutStartedAt = CACurrentMediaTime()
+    }
+
+    private func finishClosingOut() {
+        isClosingOut = false
+        stopDisplayLink()
+        overlay.dismiss(animated: true)
     }
 
     private func endEffect() {
@@ -487,8 +574,26 @@ final class LidController: ObservableObject {
         if let frame = streamer.newFrame() {
             overlay.absorb(frame)
         }
-        visualAngle.advance(to: rawAngle, dt: dt)
-        applyVisual(angle: visualAngle.value)
+        let target = isClosingOut ? preferences.thresholdAngle : rawAngle
+        visualAngle.advance(to: target, dt: dt)
+
+        guard isClosingOut else {
+            applyVisual(angle: visualAngle.value)
+            return
+        }
+        // At or above the threshold the picture is already flat, so a lid
+        // that opened past it finishes at once.
+        let settled = visualAngle.value >= target - Self.closingOutSettleEpsilon
+        let timedOut = now - closingOutStartedAt > Self.closingOutMaxDuration
+        guard settled || timedOut else {
+            applyVisual(angle: visualAngle.value)
+            return
+        }
+        // The frame that fades out must match the screen behind it exactly,
+        // so land on the threshold itself rather than just short of it.
+        visualAngle.reset(to: target)
+        applyVisual(angle: target)
+        finishClosingOut()
     }
 
     /// The geometry takes the lid angle itself, so only the blur saturates.
@@ -562,6 +667,10 @@ final class LidController: ObservableObject {
         angularVelocity = 0
         lastClosingTime = -.greatestFiniteMagnitude
         lastMovedDownTime = -.greatestFiniteMagnitude
+        timeoutReferenceAngle = nil
+        timeoutAwaitingRelease = false
+        wasTimeoutEnabled = false
+        isClosingOut = false
         if let angle = sensor.angle() {
             rawAngle = angle
             visualAngle.reset(to: angle)

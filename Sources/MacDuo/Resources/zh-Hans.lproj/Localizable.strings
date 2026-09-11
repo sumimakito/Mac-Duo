@@ -6,6 +6,8 @@
 "Live rendering" = "实时渲染";
 "Off holds the frame from when the effect started." = "关闭后，画面将停留在效果开始时的那一帧。";
 "Start" = "触发设置";
+"Timeout" = "超时";
+"Ends the effect once the angle stops changing." = "角度不再变化时结束效果。";
 "Start angle" = "起始角度";
 "The effect starts at this angle." = "屏幕合至此角度时开始生效。";
 "Full effect after" = "完全生效所需角度";

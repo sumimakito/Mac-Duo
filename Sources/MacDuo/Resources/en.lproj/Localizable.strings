@@ -6,6 +6,8 @@
 "Live rendering" = "Live rendering";
 "Off holds the frame from when the effect started." = "Off holds the frame from when the effect started.";
 "Start" = "Start";
+"Timeout" = "Timeout";
+"Ends the effect once the angle stops changing." = "Ends the effect once the angle stops changing.";
 "Start angle" = "Start angle";
 "The effect starts at this angle." = "The effect starts at this angle.";
 "Full effect after" = "Full effect after";
