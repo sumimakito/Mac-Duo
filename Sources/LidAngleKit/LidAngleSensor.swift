@@ -78,14 +78,14 @@ public final class LidAngleSensor {
         let degrees: Double
         switch resolution {
         case .hundredthsOfADegree:
-            guard bytes.count == 5 else { return nil }
+            guard bytes.count >= 5 else { return nil }
             let raw = UInt32(bytes[1])
                 | UInt32(bytes[2]) << 8
                 | UInt32(bytes[3]) << 16
                 | UInt32(bytes[4]) << 24
             degrees = Double(raw) / 100
         case .wholeDegrees:
-            guard bytes.count == 3 else { return nil }
+            guard bytes.count >= 3 else { return nil }
             degrees = Double(UInt16(bytes[1]) | UInt16(bytes[2]) << 8)
         }
 
