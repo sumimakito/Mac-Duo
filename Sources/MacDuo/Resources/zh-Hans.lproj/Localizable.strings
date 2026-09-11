@@ -6,8 +6,11 @@
 "Live rendering" = "实时渲染";
 "Off holds the frame from when the effect started." = "关闭后，画面将停留在效果开始时的那一帧。";
 "Start" = "触发设置";
+"Automatic" = "自动";
+"Stop the effects automatically." = "自动停止效果。";
 "Start angle" = "起始角度";
 "The effect starts at this angle." = "屏幕合至此角度时开始生效。";
+"Automatic effects can start below this angle." = "开启自动后，效果可能在低于此角度时开始。";
 "Full effect after" = "完全生效所需角度";
 "Degrees of further closing to reach full strength." = "继续合上此角度后，效果达到最强。";
 "Look" = "外观";

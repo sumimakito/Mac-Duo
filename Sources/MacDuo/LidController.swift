@@ -50,6 +50,12 @@ final class LidController: ObservableObject {
     private var isSuspended = false
     private var isCapturePending = false
     private var lastMovedDownTime: CFTimeInterval = -.greatestFiniteMagnitude
+    private var automaticReferenceAngle: Double?
+    private var automaticReferenceTime: CFTimeInterval = 0
+    private var automaticEffectStartAngle: Double?
+    private var automaticEffectCompletionAngle: Double?
+    private var automaticTriggerWasIncreasing = false
+    private var wasAutomatic = false
     private var builtInLayout = Layout()
 
     private static let idlePollInterval: TimeInterval = 1.0 / 8
@@ -73,6 +79,9 @@ final class LidController: ObservableObject {
     /// The overlay stays up at least this long. A prediction can fire while the
     /// last reading is still above the release angle.
     private static let minimumEffectDuration: TimeInterval = 0.35
+
+    private static let automaticMovementThreshold: Double = 2
+    private static let automaticStillDuration: TimeInterval = 2
 
     /// A scripted angle sweep, so the settings panel can show the effect
     /// without the lid moving. It feeds the same path the sensor feeds.
@@ -243,6 +252,17 @@ final class LidController: ObservableObject {
     /// angle for release and keeps a lid held below the angle showing.
     private func wantsEffect(angle: Double) -> Bool {
         guard preferences.isEnabled else { return false }
+        if preferences.isAutomatic {
+            if !wasAutomatic {
+                resetAutomaticTracking(angle: angle)
+                wasAutomatic = true
+            }
+            return wantsAutomaticEffect(angle: angle)
+        }
+        if wasAutomatic {
+            automaticReferenceAngle = nil
+            wasAutomatic = false
+        }
         let threshold = preferences.thresholdAngle
         if isActive {
             guard CACurrentMediaTime() - startedAt > Self.minimumEffectDuration else { return true }
@@ -251,6 +271,31 @@ final class LidController: ObservableObject {
         // A lid resting below the angle must not start by itself.
         let closing = CACurrentMediaTime() - lastMovedDownTime < Self.closingMemory
         return closing && predictedAngle() <= threshold
+    }
+
+    private func wantsAutomaticEffect(angle: Double) -> Bool {
+        let now = CACurrentMediaTime()
+        guard let reference = automaticReferenceAngle else {
+            resetAutomaticTracking(angle: angle, at: now)
+            return isActive
+        }
+
+        if abs(angle - reference) > Self.automaticMovementThreshold {
+            if !isActive, angle < preferences.thresholdAngle {
+                automaticTriggerWasIncreasing = angle > reference
+            }
+            resetAutomaticTracking(angle: angle, at: now)
+            return isActive || angle < preferences.thresholdAngle
+        }
+        return isActive && now - automaticReferenceTime < Self.automaticStillDuration
+    }
+
+    private func resetAutomaticTracking(
+        angle: Double,
+        at time: CFTimeInterval = CACurrentMediaTime()
+    ) {
+        automaticReferenceAngle = angle
+        automaticReferenceTime = time
     }
 
     /// Brings the screen in line with `wantsEffect` on every sample. A run
@@ -348,6 +393,13 @@ final class LidController: ObservableObject {
         isActive = active
         if active {
             startedAt = CACurrentMediaTime()
+            automaticEffectStartAngle = preferences.isAutomatic ? rawAngle : nil
+            automaticEffectCompletionAngle = preferences.isAutomatic
+                ? automaticCompletionAngle(startingAt: rawAngle)
+                : nil
+            if preferences.isAutomatic {
+                resetAutomaticTracking(angle: rawAngle, at: startedAt)
+            }
             visualAngle.reset(to: rawAngle)
             snapshotter.endPrewarm()
             setPollInterval(Self.activePollInterval)
@@ -356,6 +408,12 @@ final class LidController: ObservableObject {
             stopDisplayLink()
             overlay.dismiss(animated: true)
             snapshotter.discard()
+            automaticEffectStartAngle = nil
+            automaticEffectCompletionAngle = nil
+            automaticTriggerWasIncreasing = false
+            if preferences.isAutomatic {
+                resetAutomaticTracking(angle: rawAngle)
+            }
         }
     }
 
@@ -370,7 +428,7 @@ final class LidController: ObservableObject {
         if preferences.isLivePicture, let screen = NSScreen.builtIn,
            overlay.showLive(
                on: screen,
-               startAngle: preferences.thresholdAngle,
+               startAngle: effectStartAngle,
                tuning: tuning,
                fadeIn: Self.fadeInDuration
            ) {
@@ -446,7 +504,7 @@ final class LidController: ObservableObject {
         overlay.show(
             image: image,
             on: screen,
-            startAngle: preferences.thresholdAngle,
+            startAngle: effectStartAngle,
             tuning: tuning,
             fadeIn: Self.fadeInDuration
         )
@@ -455,8 +513,33 @@ final class LidController: ObservableObject {
     }
 
     private func blurProgress(for angle: Double) -> Double {
+        if let start = automaticEffectStartAngle,
+           let completion = automaticEffectCompletionAngle {
+            let span = completion - start
+            guard abs(span) > 0.001 else { return 1 }
+            if completion > start {
+                return min(max((completion - angle) / span, 0), 1)
+            }
+            return min(max((angle - start) / span, 0), 1)
+        }
         let span = max(preferences.blurSpan, 1)
         return min(max((preferences.thresholdAngle - angle) / span, 0), 1)
+    }
+
+    private var effectStartAngle: Double {
+        if let start = automaticEffectStartAngle,
+           let completion = automaticEffectCompletionAngle,
+           completion > start {
+            return completion
+        }
+        return automaticEffectStartAngle ?? preferences.thresholdAngle
+    }
+
+    private func automaticCompletionAngle(startingAt angle: Double) -> Double {
+        if automaticTriggerWasIncreasing, angle < preferences.thresholdAngle {
+            return preferences.thresholdAngle
+        }
+        return 0
     }
 
     // MARK: - Animation
@@ -562,6 +645,11 @@ final class LidController: ObservableObject {
         angularVelocity = 0
         lastClosingTime = -.greatestFiniteMagnitude
         lastMovedDownTime = -.greatestFiniteMagnitude
+        automaticReferenceAngle = nil
+        automaticEffectStartAngle = nil
+        automaticEffectCompletionAngle = nil
+        automaticTriggerWasIncreasing = false
+        wasAutomatic = false
         if let angle = sensor.angle() {
             rawAngle = angle
             visualAngle.reset(to: angle)

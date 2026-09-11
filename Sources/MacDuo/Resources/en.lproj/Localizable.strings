@@ -6,8 +6,11 @@
 "Live rendering" = "Live rendering";
 "Off holds the frame from when the effect started." = "Off holds the frame from when the effect started.";
 "Start" = "Start";
+"Automatic" = "Automatic";
+"Stop the effects automatically." = "Stop the effects automatically.";
 "Start angle" = "Start angle";
 "The effect starts at this angle." = "The effect starts at this angle.";
+"Automatic effects can start below this angle." = "Automatic effects can start below this angle.";
 "Full effect after" = "Full effect after";
 "Degrees of further closing to reach full strength." = "Degrees of further closing to reach full strength.";
 "Look" = "Look";
