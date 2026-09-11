@@ -8,7 +8,7 @@ final class Preferences: ObservableObject {
 
     private enum Key {
         static let isEnabled = "isEnabled"
-        static let isAutomatic = "isAutomatic"
+        static let isTimeoutEnabled = "isTimeoutEnabled"
         static let thresholdAngle = "thresholdAngle"
         static let blurSpan = "blurSpan"
         static let maxBlurRadius = "maxBlurRadius"
@@ -21,7 +21,7 @@ final class Preferences: ObservableObject {
         static let isLivePicture = "isLivePicture"
 
         static let all = [
-            isEnabled, isAutomatic, thresholdAngle, blurSpan, maxBlurRadius,
+            isEnabled, isTimeoutEnabled, thresholdAngle, blurSpan, maxBlurRadius,
             maxDim, viewingDistance, recession, blurEvenness, dimReach,
             showsAngleInMenuBar, isLivePicture,
         ]
@@ -29,7 +29,7 @@ final class Preferences: ObservableObject {
 
     private static let factory: [String: Any] = [
         Key.isEnabled: true,
-        Key.isAutomatic: false,
+        Key.isTimeoutEnabled: false,
         Key.thresholdAngle: 90.0,
         Key.blurSpan: 60.0,
         Key.maxBlurRadius: 135.0,
@@ -47,9 +47,10 @@ final class Preferences: ObservableObject {
         didSet { defaults.set(isEnabled, forKey: Key.isEnabled) }
     }
 
-    /// Starts and ends the effect from significant lid movement.
-    @Published var isAutomatic: Bool {
-        didSet { defaults.set(isAutomatic, forKey: Key.isAutomatic) }
+    /// Ends the effect early if the angle holds still while below the
+    /// threshold, instead of waiting for the lid to open back past it.
+    @Published var isTimeoutEnabled: Bool {
+        didSet { defaults.set(isTimeoutEnabled, forKey: Key.isTimeoutEnabled) }
     }
 
     /// Closing past this angle starts the depth effect. Degrees.
@@ -142,7 +143,7 @@ final class Preferences: ObservableObject {
         defaults.register(defaults: Self.factory)
         for key in Self.retired { defaults.removeObject(forKey: key) }
         isEnabled = defaults.bool(forKey: Key.isEnabled)
-        isAutomatic = defaults.bool(forKey: Key.isAutomatic)
+        isTimeoutEnabled = defaults.bool(forKey: Key.isTimeoutEnabled)
         thresholdAngle = defaults.double(forKey: Key.thresholdAngle)
         blurSpan = defaults.double(forKey: Key.blurSpan)
         maxBlurRadius = defaults.double(forKey: Key.maxBlurRadius)
@@ -160,7 +161,7 @@ final class Preferences: ObservableObject {
             defaults.removeObject(forKey: key)
         }
         isEnabled = defaults.bool(forKey: Key.isEnabled)
-        isAutomatic = defaults.bool(forKey: Key.isAutomatic)
+        isTimeoutEnabled = defaults.bool(forKey: Key.isTimeoutEnabled)
         thresholdAngle = defaults.double(forKey: Key.thresholdAngle)
         blurSpan = defaults.double(forKey: Key.blurSpan)
         maxBlurRadius = defaults.double(forKey: Key.maxBlurRadius)

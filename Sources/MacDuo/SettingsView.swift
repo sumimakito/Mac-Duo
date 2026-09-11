@@ -108,22 +108,18 @@ struct SettingsView: View {
     private var startGroup: some View {
         group(localized("Start")) {
             toggleRow(
-                localized("Automatic"),
-                isOn: $preferences.isAutomatic,
-                help: localized("Stop the effects automatically.")
+                localized("Timeout"),
+                isOn: $preferences.isTimeoutEnabled,
+                help: localized("Ends the effect once the angle stops changing.")
             )
             slider(
                 localized("Start angle"), value: $preferences.thresholdAngle, in: 5...130, format: "%.0f°",
-                help: preferences.isAutomatic
-                    ? localized("Automatic effects can start below this angle.")
-                    : localized("The effect starts at this angle.")
+                help: localized("The effect starts at this angle.")
             )
-            if !preferences.isAutomatic {
-                slider(
-                    localized("Full effect after"), value: $preferences.blurSpan, in: 5...60, format: "%.0f°",
-                    help: localized("Degrees of further closing to reach full strength.")
-                )
-            }
+            slider(
+                localized("Full effect after"), value: $preferences.blurSpan, in: 5...60, format: "%.0f°",
+                help: localized("Degrees of further closing to reach full strength.")
+            )
         }
     }
 
