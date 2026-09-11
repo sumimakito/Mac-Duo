@@ -52,6 +52,13 @@ final class ScreenSnapshotter {
         timer = nil
     }
 
+    func stop() {
+        endPrewarm()
+        inFlight?.cancel()
+        inFlight = nil
+        discard()
+    }
+
     /// Drops the held screenshot.
     func discard() {
         latestImage = nil
@@ -80,6 +87,7 @@ final class ScreenSnapshotter {
         if let inFlight { return inFlight }
         let task = Task { [weak self] in
             await self?.performCapture()
+            guard !Task.isCancelled else { return }
             self?.inFlight = nil
         }
         inFlight = task
@@ -87,11 +95,12 @@ final class ScreenSnapshotter {
     }
 
     private func performCapture() async {
+        guard !Task.isCancelled else { return }
         guard let screen = NSScreen.builtIn, let displayID = screen.displayID else { return }
         if filter == nil || filterDisplayID != displayID {
             await rebuildFilter(displayID: displayID)
         }
-        guard let activeFilter = filter else { return }
+        guard !Task.isCancelled, let activeFilter = filter else { return }
 
         let configuration = SCStreamConfiguration()
         configuration.width = Int(activeFilter.contentRect.width * CGFloat(activeFilter.pointPixelScale))
@@ -106,6 +115,7 @@ final class ScreenSnapshotter {
                 contentFilter: activeFilter,
                 configuration: configuration
             )
+            guard !Task.isCancelled else { return }
             let elapsed = (CFAbsoluteTimeGetCurrent() - started) * 1000
             latestImage = image
             latestScreen = screen
@@ -125,6 +135,7 @@ final class ScreenSnapshotter {
                 Diagnostics.geometry.notice("capture: \(geometry, privacy: .public)")
             }
         } catch {
+            guard !Task.isCancelled else { return }
             filter = nil
             filterDisplayID = nil
         }
@@ -137,6 +148,7 @@ final class ScreenSnapshotter {
                 false,
                 onScreenWindowsOnly: true
             )
+            guard !Task.isCancelled else { return }
             Diagnostics.geometry.notice(
                 "SCShareableContent took \((CFAbsoluteTimeGetCurrent() - started) * 1000, format: .fixed(precision: 1)) ms"
             )
@@ -154,6 +166,7 @@ final class ScreenSnapshotter {
             )
             filterDisplayID = displayID
         } catch {
+            guard !Task.isCancelled else { return }
             filter = nil
             filterDisplayID = nil
         }

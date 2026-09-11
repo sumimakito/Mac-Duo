@@ -29,6 +29,8 @@ final class LidController: ObservableObject {
     private let overlay = DepthOverlay()
     private let streamer = ScreenStreamer()
 
+    private var enabledSubscription: AnyCancellable?
+    private var pictureTask: Task<Void, Never>?
     private var pollTimer: Timer?
     private var pollInterval: TimeInterval = 0
     private var displayLink: CADisplayLink?
@@ -96,6 +98,12 @@ final class LidController: ObservableObject {
 
     init(preferences: Preferences) {
         self.preferences = preferences
+        enabledSubscription = preferences.$isEnabled
+            .removeDuplicates()
+            .sink { [weak self] enabled in
+                guard !enabled else { return }
+                self?.disableEffect()
+            }
     }
 
     // MARK: - Lifecycle
@@ -133,17 +141,34 @@ final class LidController: ObservableObject {
         pollTimer?.invalidate()
         pollTimer = nil
         pollInterval = 0
+        stopEffectAndCapture()
+    }
+
+    private func stopEffectAndCapture() {
+        pictureTask?.cancel()
+        pictureTask = nil
+        isCapturePending = false
         stopDisplayLink()
         overlay.dismiss(animated: false)
-        snapshotter.endPrewarm()
+        snapshotter.stop()
         streamer.stop()
         overlay.discardLive()
+        preview = nil
         isActive = false
+    }
+
+    private func disableEffect() {
+        stopEffectAndCapture()
+        lastChangedAngle = nil
+        angularVelocity = 0
+        lastClosingTime = -.greatestFiniteMagnitude
+        lastMovedDownTime = -.greatestFiniteMagnitude
+        if pollTimer != nil { setPollInterval(Self.idlePollInterval) }
     }
 
     /// Plays the effect once on the current screen contents.
     func runPreview() {
-        guard preview == nil, !isActive else { return }
+        guard preferences.isEnabled, !isSuspended, preview == nil, !isActive else { return }
         // Well above the trigger angle, so the sweep runs the pre-warm the way
         // a real close does.
         preview = PreviewRun(
@@ -201,13 +226,16 @@ final class LidController: ObservableObject {
         }
 
         rawAngle = angle
-        updateVelocity(with: angle)
         publish(angle: angle)
 
-        reconcile(angle: angle)
+        if preferences.isEnabled {
+            updateVelocity(with: angle)
+            reconcile(angle: angle)
+        }
 
         let prewarmZone = preferences.thresholdAngle + preferences.prewarmCeiling
-        let wantsFastPolling = preview != nil || isActive || angle <= prewarmZone + Self.fastPollMargin
+        let wantsFastPolling = preferences.isEnabled
+            && (preview != nil || isActive || angle <= prewarmZone + Self.fastPollMargin)
         setPollInterval(wantsFastPolling ? Self.activePollInterval : Self.idlePollInterval)
     }
 
@@ -228,6 +256,7 @@ final class LidController: ObservableObject {
     /// Brings the screen in line with `wantsEffect` on every sample. A run
     /// whose screenshot failed is retried here.
     private func reconcile(angle: Double) {
+        guard preferences.isEnabled, !isSuspended else { return }
         let wanted = wantsEffect(angle: angle)
         if wanted != isActive {
             Diagnostics.lid.notice(
@@ -337,6 +366,7 @@ final class LidController: ObservableObject {
     /// Shows the held screenshot, or waits for one. A pre-warm capture that is
     /// already running counts as that wait.
     private func presentPicture() {
+        guard preferences.isEnabled, !isSuspended, isActive else { return }
         if preferences.isLivePicture, let screen = NSScreen.builtIn,
            overlay.showLive(
                on: screen,
@@ -367,9 +397,12 @@ final class LidController: ObservableObject {
             return
         }
         isCapturePending = true
-        Task { [weak self] in
-            guard let self else { return }
+        pictureTask?.cancel()
+        pictureTask = Task { [weak self] in
+            guard let self, !Task.isCancelled else { return }
             await self.snapshotter.captureOnce()
+            guard !Task.isCancelled else { return }
+            self.pictureTask = nil
             self.isCapturePending = false
             Diagnostics.lid.notice(
                 """
@@ -389,9 +422,12 @@ final class LidController: ObservableObject {
     private func requestSeed() {
         isCapturePending = true
         let started = CACurrentMediaTime()
-        Task { [weak self] in
-            guard let self else { return }
+        pictureTask?.cancel()
+        pictureTask = Task { [weak self] in
+            guard let self, !Task.isCancelled else { return }
             await self.snapshotter.captureOnce()
+            guard !Task.isCancelled else { return }
+            self.pictureTask = nil
             self.isCapturePending = false
             Diagnostics.lid.notice(
                 """
@@ -514,15 +550,7 @@ final class LidController: ObservableObject {
     private func suspend() {
         Diagnostics.lid.notice("suspend")
         isSuspended = true
-        stopDisplayLink()
-        overlay.dismiss(animated: false)
-        snapshotter.endPrewarm()
-        snapshotter.discard()
-        streamer.stop()
-        overlay.discardLive()
-        preview = nil
-        isActive = false
-        isCapturePending = false
+        stopEffectAndCapture()
     }
 
     private func resume() {

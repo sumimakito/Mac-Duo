@@ -103,6 +103,7 @@ final class ScreenStreamer {
         isStarted = true
         startTask = Task { [weak self] in
             await self?.begin(displayID: displayID, on: target)
+            guard !Task.isCancelled else { return }
             self?.startTask = nil
         }
     }
@@ -147,6 +148,7 @@ final class ScreenStreamer {
     }
 
     private func begin(displayID: CGDirectDisplayID, on target: NSScreen) async {
+        guard !Task.isCancelled else { return }
         guard let device, let receiver = Receiver(device: device) else {
             isStarted = false
             return
@@ -155,7 +157,7 @@ final class ScreenStreamer {
             if filter == nil || filterDisplayID != displayID {
                 await rebuildFilter(displayID: displayID)
             }
-            guard isStarted, let activeFilter = filter else { return }
+            guard !Task.isCancelled, isStarted, let activeFilter = filter else { return }
 
             let configuration = SCStreamConfiguration()
             configuration.width = Int(activeFilter.contentRect.width * CGFloat(activeFilter.pointPixelScale))
@@ -175,7 +177,7 @@ final class ScreenStreamer {
             )
             let started = CFAbsoluteTimeGetCurrent()
             try await fresh.startCapture()
-            guard isStarted else {
+            guard !Task.isCancelled, isStarted else {
                 try? await fresh.stopCapture()
                 return
             }
@@ -189,6 +191,7 @@ final class ScreenStreamer {
                 """
             )
         } catch {
+            guard !Task.isCancelled else { return }
             Diagnostics.geometry.error("stream failed: \(String(describing: error), privacy: .public)")
             invalidateFilter()
             isStarted = false
@@ -201,6 +204,7 @@ final class ScreenStreamer {
                 false,
                 onScreenWindowsOnly: true
             )
+            guard !Task.isCancelled else { return }
             guard let display = content.displays.first(where: { $0.displayID == displayID }) else {
                 invalidateFilter()
                 return
@@ -218,6 +222,7 @@ final class ScreenStreamer {
             )
             filterDisplayID = displayID
         } catch {
+            guard !Task.isCancelled else { return }
             Diagnostics.geometry.error("stream filter failed: \(String(describing: error), privacy: .public)")
             invalidateFilter()
         }
