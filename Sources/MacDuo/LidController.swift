@@ -49,6 +49,8 @@ final class LidController: ObservableObject {
     private var isCapturePending = false
     private var lastMovedDownTime: CFTimeInterval = -.greatestFiniteMagnitude
     private var builtInLayout = Layout()
+    private var peakAngle: Double = 0
+    private var releaseAngle: Double = 0
 
     private static let idlePollInterval: TimeInterval = 1.0 / 8
     private static let activePollInterval: TimeInterval = 1.0 / 30
@@ -71,6 +73,8 @@ final class LidController: ObservableObject {
     /// The overlay stays up at least this long. A prediction can fire while the
     /// last reading is still above the release angle.
     private static let minimumEffectDuration: TimeInterval = 0.35
+
+    private static let releaseMargin: Double = 2
 
     /// A scripted angle sweep, so the settings panel can show the effect
     /// without the lid moving. It feeds the same path the sensor feeds.
@@ -148,7 +152,10 @@ final class LidController: ObservableObject {
         // a real close does.
         preview = PreviewRun(
             startedAt: CACurrentMediaTime(),
-            open: min(preferences.thresholdAngle + 35, 130),
+            open: max(
+                preferences.thresholdAngle + preferences.hysteresis + 5,
+                min(preferences.thresholdAngle + 35, 130)
+            ),
             shut: max(preferences.thresholdAngle - preferences.blurSpan * 1.15, 5)
         )
         setPollInterval(Self.activePollInterval)
@@ -174,6 +181,8 @@ final class LidController: ObservableObject {
         if let run = preview {
             guard let scripted = run.angle(at: CACurrentMediaTime()) else {
                 preview = nil
+                peakAngle = 0
+                if isActive { setActive(false) }
                 return
             }
             angle = scripted
@@ -201,6 +210,7 @@ final class LidController: ObservableObject {
         }
 
         rawAngle = angle
+        peakAngle = max(peakAngle, angle)
         updateVelocity(with: angle)
         publish(angle: angle)
 
@@ -218,11 +228,11 @@ final class LidController: ObservableObject {
         let threshold = preferences.thresholdAngle
         if isActive {
             guard CACurrentMediaTime() - startedAt > Self.minimumEffectDuration else { return true }
-            return angle < threshold + preferences.hysteresis
+            return angle < releaseAngle
         }
         // A lid resting below the angle must not start by itself.
         let closing = CACurrentMediaTime() - lastMovedDownTime < Self.closingMemory
-        return closing && predictedAngle() <= threshold
+        return peakAngle >= threshold && closing && predictedAngle() <= threshold
     }
 
     /// Brings the screen in line with `wantsEffect` on every sample. A run
@@ -242,6 +252,7 @@ final class LidController: ObservableObject {
             return
         }
         if isActive {
+            if preferences.isLivePicture { streamer.start() }
             if !overlay.isVisible, !isCapturePending { presentPicture() }
             // A visible overlay with no link would sit at its first frame.
             if overlay.isVisible, displayLink == nil { startDisplayLink() }
@@ -318,6 +329,8 @@ final class LidController: ObservableObject {
     private func setActive(_ active: Bool) {
         isActive = active
         if active {
+            releaseAngle = min(preferences.thresholdAngle + preferences.hysteresis, peakAngle - Self.releaseMargin)
+            peakAngle = rawAngle
             startedAt = CACurrentMediaTime()
             visualAngle.reset(to: rawAngle)
             snapshotter.endPrewarm()
@@ -534,6 +547,7 @@ final class LidController: ObservableObject {
         angularVelocity = 0
         lastClosingTime = -.greatestFiniteMagnitude
         lastMovedDownTime = -.greatestFiniteMagnitude
+        peakAngle = 0
         if let angle = sensor.angle() {
             rawAngle = angle
             visualAngle.reset(to: angle)
