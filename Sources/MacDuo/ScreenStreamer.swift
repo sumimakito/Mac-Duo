@@ -77,6 +77,8 @@ final class ScreenStreamer {
     private var stream: SCStream?
     private var receiver: Receiver?
     private var startTask: Task<Void, Never>?
+    /// Identifies the only start operation that may publish stream state.
+    private var startGeneration: UInt64 = 0
     /// Enumerating every on screen window costs about 70 ms, so the filter is
     /// kept between runs and rebuilt only when the display changes.
     private var filter: SCContentFilter?
@@ -99,17 +101,21 @@ final class ScreenStreamer {
     func start() {
         guard !isStarted, startTask == nil, device != nil else { return }
         guard let target = NSScreen.builtIn, let displayID = target.displayID else { return }
+        startGeneration &+= 1
+        let generation = startGeneration
         screen = target
         isStarted = true
         startTask = Task { [weak self] in
-            await self?.begin(displayID: displayID, on: target)
-            guard !Task.isCancelled else { return }
-            self?.startTask = nil
+            await self?.begin(displayID: displayID, on: target, generation: generation)
+            guard !Task.isCancelled, let self,
+                  generation == self.startGeneration else { return }
+            self.startTask = nil
         }
     }
 
     func stop() {
-        guard isStarted || stream != nil else { return }
+        guard isStarted || stream != nil || startTask != nil else { return }
+        startGeneration &+= 1
         isStarted = false
         startTask?.cancel()
         startTask = nil
@@ -127,7 +133,8 @@ final class ScreenStreamer {
     func warmFilter() async {
         guard let displayID = NSScreen.builtIn?.displayID else { return }
         guard filter == nil || filterDisplayID != displayID else { return }
-        await rebuildFilter(displayID: displayID)
+        let generation = startGeneration
+        await rebuildFilter(displayID: displayID, generation: generation)
     }
 
     /// Drops the cached filter, so the next start enumerates the windows again.
@@ -147,17 +154,22 @@ final class ScreenStreamer {
         return latest.frame
     }
 
-    private func begin(displayID: CGDirectDisplayID, on target: NSScreen) async {
-        guard !Task.isCancelled else { return }
+    private func begin(displayID: CGDirectDisplayID, on target: NSScreen, generation: UInt64) async {
+        guard !Task.isCancelled, generation == startGeneration, isStarted else { return }
         guard let device, let receiver = Receiver(device: device) else {
+            guard !Task.isCancelled, generation == startGeneration else { return }
             isStarted = false
             return
         }
         do {
             if filter == nil || filterDisplayID != displayID {
-                await rebuildFilter(displayID: displayID)
+                await rebuildFilter(displayID: displayID, generation: generation)
             }
-            guard !Task.isCancelled, isStarted, let activeFilter = filter else { return }
+            guard !Task.isCancelled, generation == startGeneration, isStarted else { return }
+            guard let activeFilter = filter else {
+                isStarted = false
+                return
+            }
 
             let configuration = SCStreamConfiguration()
             configuration.width = Int(activeFilter.contentRect.width * CGFloat(activeFilter.pointPixelScale))
@@ -177,7 +189,7 @@ final class ScreenStreamer {
             )
             let started = CFAbsoluteTimeGetCurrent()
             try await fresh.startCapture()
-            guard !Task.isCancelled, isStarted else {
+            guard !Task.isCancelled, generation == startGeneration, isStarted else {
                 try? await fresh.stopCapture()
                 return
             }
@@ -191,20 +203,20 @@ final class ScreenStreamer {
                 """
             )
         } catch {
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, generation == startGeneration else { return }
             Diagnostics.geometry.error("stream failed: \(String(describing: error), privacy: .public)")
             invalidateFilter()
             isStarted = false
         }
     }
 
-    private func rebuildFilter(displayID: CGDirectDisplayID) async {
+    private func rebuildFilter(displayID: CGDirectDisplayID, generation: UInt64) async {
         do {
             let content = try await SCShareableContent.excludingDesktopWindows(
                 false,
                 onScreenWindowsOnly: true
             )
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, generation == startGeneration else { return }
             guard let display = content.displays.first(where: { $0.displayID == displayID }) else {
                 invalidateFilter()
                 return
@@ -222,7 +234,7 @@ final class ScreenStreamer {
             )
             filterDisplayID = displayID
         } catch {
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, generation == startGeneration else { return }
             Diagnostics.geometry.error("stream filter failed: \(String(describing: error), privacy: .public)")
             invalidateFilter()
         }
