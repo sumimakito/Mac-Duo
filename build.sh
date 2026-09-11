@@ -36,6 +36,8 @@ PROBE="$BIN_PATH/lidprobe"
 rm -rf "$BUNDLE"
 mkdir -p "$BUNDLE/Contents/MacOS" "$BUNDLE/Contents/Resources"
 cp "$BINARY" "$BUNDLE/Contents/MacOS/MacDuo"
+# SwiftPM resolves Bundle.module relative to the application bundle.
+cp -R "$BIN_PATH/MacDuo_MacDuo.bundle" "$BUNDLE/Contents/Resources/"
 cp Resources/Info.plist "$BUNDLE/Contents/Info.plist"
 cp LICENSE NOTICE "$BUNDLE/Contents/Resources/"
 if [ -f Resources/AppIcon.icns ]; then
