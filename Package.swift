@@ -22,5 +22,11 @@ let package = Package(
             path: "Sources/lidprobe",
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
+        .testTarget(
+            name: "MacDuoTests",
+            dependencies: ["MacDuo"],
+            path: "Tests/MacDuoTests",
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
     ]
 )
