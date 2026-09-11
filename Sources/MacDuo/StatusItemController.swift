@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 
 /// The menu bar item and the settings popover.
@@ -9,7 +10,8 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     private let popover = NSPopover()
     private let preferences: Preferences
     private let controller: LidController
-    private var titleTimer: Timer?
+    private var showsAngleSubscription: AnyCancellable?
+    private var angleSubscription: AnyCancellable?
     private var barWindowMoved: NSObjectProtocol?
 
     init(controller: LidController, preferences: Preferences) {
@@ -43,17 +45,17 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         hostingController.sizingOptions = [.preferredContentSize]
         popover.contentViewController = hostingController
 
-        let timer = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.refreshTitle() }
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        titleTimer = timer
-        refreshTitle()
+        showsAngleSubscription = preferences.$showsAngleInMenuBar
+            .removeDuplicates()
+            .sink { [weak self] showsAngle in
+                self?.setShowsAngle(showsAngle)
+            }
         watchBarWindow()
     }
 
     deinit {
-        titleTimer?.invalidate()
+        showsAngleSubscription?.cancel()
+        angleSubscription?.cancel()
         if let barWindowMoved {
             NotificationCenter.default.removeObserver(barWindowMoved)
         }
@@ -99,12 +101,28 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         popover.show(relativeTo: .zero, of: button, preferredEdge: .minY)
     }
 
-    private func refreshTitle() {
-        guard let button = statusItem.button else { return }
-        if preferences.showsAngleInMenuBar {
-            button.title = String(format: " %.0f°", controller.currentAngle)
-        } else if !button.title.isEmpty {
-            button.title = ""
+    private func setShowsAngle(_ showsAngle: Bool) {
+        angleSubscription?.cancel()
+        angleSubscription = nil
+
+        guard showsAngle else {
+            statusItem.button?.title = ""
+            return
         }
+        // Throttle delivers its first value asynchronously, so show it now;
+        // the 250 ms window preserves the former timer's 4 Hz ceiling.
+        statusItem.button?.title = Self.angleTitle(controller.currentAngle)
+        angleSubscription = controller.$currentAngle
+            .map(Self.angleTitle)
+            .removeDuplicates()
+            .throttle(for: .milliseconds(250), scheduler: RunLoop.main, latest: true)
+            .sink { [weak self] title in
+                guard self?.statusItem.button?.title != title else { return }
+                self?.statusItem.button?.title = title
+            }
+    }
+
+    private static func angleTitle(_ angle: Double) -> String {
+        String(format: " %.0f°", angle)
     }
 }
