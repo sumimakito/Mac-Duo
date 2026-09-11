@@ -32,5 +32,4 @@
 "Open System Settings" = "打开系统设置";
 "Could not open System Settings. Open it manually and enable screen recording for Mac Duo under Privacy & Security." = "无法打开系统设置。请手动打开，在“隐私与安全性”中为 Mac Duo 开启屏幕录制权限。";
 "Language" = "语言";
-"Switch to Chinese" = "切换为中文";
-"Switch to English" = "切换为英文";
+"Chinese (Simplified)" = "简体中文";

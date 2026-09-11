@@ -156,13 +156,15 @@ struct SettingsView: View {
             HStack {
                 Text(localized("Language"))
                 Spacer()
-                Button {
-                    language = selectedLanguage == .english ? SettingsLanguage.chinese.rawValue : SettingsLanguage.english.rawValue
-                } label: {
-                    Text(verbatim: selectedLanguage == .english ? "中文" : "English")
+                Picker("", selection: $language) {
+                    Text(verbatim: "English").tag(SettingsLanguage.english.rawValue)
+                    Text(localized("Chinese (Simplified)")).tag(SettingsLanguage.chinese.rawValue)
                 }
+                .labelsHidden()
+                .pickerStyle(.menu)
                 .controlSize(.small)
-                .accessibilityLabel(localized(selectedLanguage == .english ? "Switch to Chinese" : "Switch to English"))
+                .fixedSize()
+                .accessibilityLabel(localized("Language"))
             }
             toggleRow(localized("Show angle in menu bar"), isOn: $preferences.showsAngleInMenuBar, help: nil)
             toggleRow(localized("Launch at login"), isOn: $launchesAtLogin, help: nil)
