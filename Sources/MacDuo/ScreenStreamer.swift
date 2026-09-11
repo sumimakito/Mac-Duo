@@ -156,6 +156,10 @@ final class ScreenStreamer {
         do {
             if filter == nil || filterDisplayID != displayID {
                 await rebuildFilter(displayID: displayID)
+                guard filter != nil, filterDisplayID == displayID else {
+                    if !Task.isCancelled { isStarted = false }
+                    return
+                }
             }
             guard !Task.isCancelled, isStarted, let activeFilter = filter else { return }
 
@@ -210,10 +214,12 @@ final class ScreenStreamer {
                 return
             }
             // Exclude ourselves, or the overlay feeds back into its own picture.
-            let bundleID = Bundle.main.bundleIdentifier
-            let ownApplications = content.applications.filter { $0.bundleIdentifier == bundleID }
-            if ownApplications.isEmpty {
-                Diagnostics.geometry.error("stream cannot exclude this app: it owns no window yet")
+            guard let ownApplications = CaptureFilterSafety.excludedApplications(in: content) else {
+                Diagnostics.geometry.error(
+                    "stream cannot exclude this app: its presence window is not shareable yet"
+                )
+                invalidateFilter()
+                return
             }
             filter = SCContentFilter(
                 display: display,
