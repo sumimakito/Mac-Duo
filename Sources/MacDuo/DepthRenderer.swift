@@ -59,7 +59,7 @@ final class DepthRenderer {
     private var liveScale: CGFloat = 0
     private var isLiveSource = false
     /// The newest live frame, waiting for the next drawn frame to take it.
-    private var pendingFrame: MTLTexture?
+    private var pendingFrame: CapturedFrame?
     /// A held picture to start from, waiting for the same moment. A live
     /// frame that arrives first wins, since it is the newer of the two.
     private var pendingSeed: (buffer: MTLBuffer, width: Int, height: Int)?
@@ -289,7 +289,7 @@ final class DepthRenderer {
         return true
     }
 
-    func absorb(_ frame: MTLTexture) {
+    func absorb(_ frame: CapturedFrame) {
         guard isLiveSource, liveTexture != nil else { return }
         pendingFrame = frame
         pendingSeed = nil
@@ -304,11 +304,11 @@ final class DepthRenderer {
         let inset = Int((Self.paddingInPoints * pixelScale).rounded())
         guard let blit = commands.makeBlitCommandEncoder() else { return }
         if let frame = pendingFrame {
-            let width = min(frame.width, target.width - 2 * inset)
-            let height = min(frame.height, target.height - 2 * inset)
+            let width = min(frame.texture.width, target.width - 2 * inset)
+            let height = min(frame.texture.height, target.height - 2 * inset)
             guard width > 0, height > 0 else { blit.endEncoding(); return }
             blit.copy(
-                from: frame,
+                from: frame.texture,
                 sourceSlice: 0,
                 sourceLevel: 0,
                 sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
@@ -318,6 +318,9 @@ final class DepthRenderer {
                 destinationLevel: 0,
                 destinationOrigin: MTLOrigin(x: inset, y: inset, z: 0)
             )
+            commands.addCompletedHandler { [frame] _ in
+                withExtendedLifetime(frame) {}
+            }
         } else if let seed = pendingSeed {
             let width = min(seed.width, target.width - 2 * inset)
             let height = min(seed.height, target.height - 2 * inset)

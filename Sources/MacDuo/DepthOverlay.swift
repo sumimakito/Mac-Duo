@@ -172,7 +172,7 @@ final class DepthOverlay {
 
     /// Hands one live frame to the renderer and reveals the window once the
     /// first one has landed.
-    func absorb(_ frame: MTLTexture) {
+    func absorb(_ frame: CapturedFrame) {
         guard window != nil, let renderer else { return }
         renderer.absorb(frame)
         reveal()

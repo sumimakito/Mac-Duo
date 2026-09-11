@@ -3,7 +3,6 @@ import CoreVideo
 import Metal
 import ScreenCaptureKit
 
-/// A live picture of the built-in display, handed over as Metal textures.
 ///
 /// Frames are `IOSurface` backed, so wrapping one as a texture copies nothing.
 /// `startCapture` takes long enough that the stream has to be started while
@@ -21,7 +20,7 @@ final class ScreenStreamer {
     private final class Receiver: NSObject, SCStreamOutput {
         private let cache: CVMetalTextureCache
         private let lock = NSLock()
-        private var newest: CVMetalTexture?
+        private var newest: CapturedFrame?
         private var newestID: UInt64 = 0
 
         init?(device: MTLDevice) {
@@ -33,11 +32,11 @@ final class ScreenStreamer {
         }
 
         /// The newest frame and its number, or `nil` before the first one.
-        func latest() -> (texture: MTLTexture, id: UInt64)? {
+        func latest() -> (frame: CapturedFrame, id: UInt64)? {
             lock.lock()
             defer { lock.unlock() }
-            guard let newest, let texture = CVMetalTextureGetTexture(newest) else { return nil }
-            return (texture, newestID)
+            guard let newest else { return nil }
+            return (newest, newestID)
         }
 
         func stream(
@@ -64,10 +63,11 @@ final class ScreenStreamer {
                 0,
                 &wrapped
             )
-            guard result == kCVReturnSuccess, let wrapped else { return }
+            guard result == kCVReturnSuccess, let wrapped,
+                  let frame = CapturedFrame(wrapped) else { return }
 
             lock.lock()
-            newest = wrapped
+            newest = frame
             newestID &+= 1
             lock.unlock()
         }
@@ -138,13 +138,13 @@ final class ScreenStreamer {
 
     /// The newest frame, but only once. `nil` when nothing new has arrived
     /// since the last call.
-    func newFrame() -> MTLTexture? {
+    func newFrame() -> CapturedFrame? {
         let now = CACurrentMediaTime()
         guard now - lastHandOver >= Self.minimumHandOverInterval else { return nil }
         guard let latest = receiver?.latest(), latest.id != consumedID else { return nil }
         consumedID = latest.id
         lastHandOver = now
-        return latest.texture
+        return latest.frame
     }
 
     private func begin(displayID: CGDirectDisplayID, on target: NSScreen) async {
