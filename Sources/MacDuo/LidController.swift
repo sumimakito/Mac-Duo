@@ -272,7 +272,7 @@ final class LidController: ObservableObject {
     /// angle for release and keeps a lid held below the angle showing, unless
     /// the timeout ends it first.
     private func wantsEffect(angle: Double) -> Bool {
-        guard preferences.isEnabled else { return false }
+        guard preferences.isEnabled, NSScreen.builtIn != nil else { return false }
         if preferences.isTimeoutEnabled != wasTimeoutEnabled {
             timeoutReferenceAngle = nil
             timeoutAwaitingRelease = false

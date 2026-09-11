@@ -4,9 +4,9 @@ import IOKit.hid
 
 /// Reads the lid hinge angle from the MacBook orientation sensor.
 ///
-/// The sensor is an `AppleSPUHIDDevice`, vendor `0x05AC`, product `0x8104`, on
-/// HID usage page `0x20`, usage `0x8A`. Two reports carry the same angle, both
-/// through `kIOHIDReportTypeFeature`:
+/// Discovers Apple's built-in orientation sensors on HID usage page `0x20`,
+/// usage `0x8A`, without requiring a specific product ID. Supported angle reports use
+/// `kIOHIDReportTypeFeature`:
 ///
 /// - Report 1: 3 bytes `[0x01, lo, hi]`, whole degrees, 0...360.
 /// - Report 7: 5 bytes `[0x07, b0, b1, b2, b3]`, little-endian hundredths of a
@@ -73,18 +73,19 @@ public final class LidAngleSensor {
     public func angle() -> Double? {
         guard let resolution else { return nil }
         guard let bytes = read(reportID: resolution.reportID) else { return nil }
+        guard bytes.first == UInt8(resolution.reportID) else { return nil }
 
         let degrees: Double
         switch resolution {
         case .hundredthsOfADegree:
-            guard bytes.count >= 5 else { return nil }
+            guard bytes.count == 5 else { return nil }
             let raw = UInt32(bytes[1])
                 | UInt32(bytes[2]) << 8
                 | UInt32(bytes[3]) << 16
                 | UInt32(bytes[4]) << 24
             degrees = Double(raw) / 100
         case .wholeDegrees:
-            guard bytes.count >= 3 else { return nil }
+            guard bytes.count == 3 else { return nil }
             degrees = Double(UInt16(bytes[1]) | UInt16(bytes[2]) << 8)
         }
 
@@ -100,6 +101,7 @@ public final class LidAngleSensor {
     private func open() {
         let manager = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
         let matching: [String: Any] = [
+            kIOHIDVendorIDKey: 0x05AC,
             kIOHIDDeviceUsagePageKey: 0x20,
             kIOHIDDeviceUsageKey: 0x8A,
         ]
@@ -112,17 +114,17 @@ public final class LidAngleSensor {
 
         guard let devices = IOHIDManagerCopyDevices(manager) as? Set<IOHIDDevice> else { return }
         for candidate in devices {
-            device = candidate
-            if let bytes = read(reportID: 7), bytes.count >= 5 {
-                resolution = .hundredthsOfADegree
-                return
+            guard (IOHIDDeviceGetProperty(candidate, "Built-In" as CFString) as? NSNumber)?.boolValue == true else {
+                continue
             }
-            if let bytes = read(reportID: 1), bytes.count >= 3 {
-                resolution = .wholeDegrees
-                return
+            device = candidate
+            for format in [Resolution.hundredthsOfADegree, .wholeDegrees] {
+                resolution = format
+                if angle() != nil { return }
             }
         }
         device = nil
+        resolution = nil
     }
 
     private func read(reportID: Int) -> [UInt8]? {
