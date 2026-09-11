@@ -227,10 +227,13 @@ struct SettingsView: View {
             Text(localized("Screen Recording permission is required to show the depth effect."))
                 .font(.callout)
                 .fixedSize(horizontal: false, vertical: true)
-            Button(localized("Open System Settings")) {
-                openScreenRecordingSettings()
+            HStack {
+                Spacer()
+                Button(localized("Open System Settings")) {
+                    openScreenRecordingSettings()
+                }
+                .controlSize(.small)
             }
-            .controlSize(.small)
             if settingsOpenFailed {
                 Text(localized("Could not open System Settings. Open it manually and enable screen recording for Mac Duo under Privacy & Security."))
                     .font(.caption)
@@ -238,6 +241,7 @@ struct SettingsView: View {
             }
         }
         .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
     }
 
