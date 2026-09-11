@@ -1,0 +1,30 @@
+[
+  {
+    "label": "swift: Build Debug lidprobe",
+    "command": "swift",
+    "args": ["build", "--configuration", "debug", "--product", "lidprobe"],
+    "use_new_terminal": false,
+    "allow_concurrent_runs": true
+  },
+  {
+    "label": "swift: Build Release lidprobe",
+    "command": "swift",
+    "args": ["build", "--configuration", "release", "--product", "lidprobe"],
+    "use_new_terminal": false,
+    "allow_concurrent_runs": true
+  },
+  {
+    "label": "swift: Build Debug MacDuo",
+    "command": "swift",
+    "args": ["build", "--configuration", "debug", "--product", "MacDuo"],
+    "use_new_terminal": false,
+    "allow_concurrent_runs": true
+  },
+  {
+    "label": "swift: Build Release MacDuo",
+    "command": "swift",
+    "args": ["build", "--configuration", "release", "--product", "MacDuo"],
+    "use_new_terminal": false,
+    "allow_concurrent_runs": true
+  }
+]

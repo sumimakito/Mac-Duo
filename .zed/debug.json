@@ -1,0 +1,34 @@
+[
+  {
+    "label": "Debug lidprobe",
+    "adapter": "Swift",
+    "request": "launch",
+    "program": "$ZED_WORKTREE_ROOT/.build/debug/lidprobe",
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "build": "swift: Build Debug lidprobe"
+  },
+  {
+    "label": "Release lidprobe",
+    "adapter": "Swift",
+    "request": "launch",
+    "program": "$ZED_WORKTREE_ROOT/.build/release/lidprobe",
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "build": "swift: Build Release lidprobe"
+  },
+  {
+    "label": "Debug MacDuo",
+    "adapter": "Swift",
+    "request": "launch",
+    "program": "$ZED_WORKTREE_ROOT/.build/debug/MacDuo",
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "build": "swift: Build Debug MacDuo"
+  },
+  {
+    "label": "Release MacDuo",
+    "adapter": "Swift",
+    "request": "launch",
+    "program": "$ZED_WORKTREE_ROOT/.build/release/MacDuo",
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "build": "swift: Build Release MacDuo"
+  }
+]
