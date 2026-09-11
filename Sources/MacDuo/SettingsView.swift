@@ -6,7 +6,8 @@ struct SettingsView: View {
     @ObservedObject var preferences: Preferences
     @ObservedObject var controller: LidController
 
-    @AppStorage("settingsLanguage") private var language = SettingsLanguage.preferred.rawValue
+    /// Empty means following the system language.
+    @AppStorage("settingsLanguage") private var language = ""
 
     private var selectedLanguage: SettingsLanguage {
         SettingsLanguage(rawValue: language) ?? .preferred
@@ -157,6 +158,7 @@ struct SettingsView: View {
                 Text(localized("Language"))
                 Spacer()
                 Picker("", selection: $language) {
+                    Text(localized("System")).tag("")
                     Text(verbatim: "English").tag(SettingsLanguage.english.rawValue)
                     Text(localized("Chinese (Simplified)")).tag(SettingsLanguage.chinese.rawValue)
                 }
