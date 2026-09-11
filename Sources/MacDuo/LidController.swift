@@ -48,6 +48,7 @@ final class LidController: ObservableObject {
     private var isSuspended = false
     private var isCapturePending = false
     private var motionIntent = LidMotionIntent()
+    private var openDwell = LidOpenDwell()
     private var builtInLayout = Layout()
     private var peakAngle: Double = 0
 
@@ -76,6 +77,10 @@ final class LidController: ObservableObject {
     /// while the last reading is still above the trigger angle, but deliberate
     /// opening is allowed to release immediately.
     private static let minimumEffectDuration: TimeInterval = 0.35
+
+    /// How long a lid held above the start angle waits before it counts as
+    /// opened again, for openings slower than `triggerOpeningSpeed`.
+    private static let openDwellDuration: TimeInterval = 1
 
     /// A scripted angle sweep, so the settings panel can show the effect
     /// without the lid moving. It feeds the same path the sensor feeds.
@@ -213,6 +218,7 @@ final class LidController: ObservableObject {
         rawAngle = angle
         peakAngle = max(peakAngle, angle)
         updateVelocity(with: angle)
+        openDwell.update(angle: angle, at: CACurrentMediaTime(), dwellAngle: effectPolicy.dwellAngle)
         publish(angle: angle)
 
         reconcile(angle: angle)
@@ -222,12 +228,16 @@ final class LidController: ObservableObject {
         setPollInterval(wantsFastPolling ? Self.activePollInterval : Self.idlePollInterval)
     }
 
+    private var effectPolicy: LidEffectPolicy {
+        LidEffectPolicy(threshold: preferences.thresholdAngle, hysteresis: preferences.hysteresis)
+    }
+
     /// Whether the picture belongs on screen for this angle. It widens the
     /// angle for release and keeps a lid held below the angle showing.
     private func wantsEffect(angle: Double) -> Bool {
         let now = CACurrentMediaTime()
         let threshold = preferences.thresholdAngle
-        return LidEffectPolicy(threshold: threshold, hysteresis: preferences.hysteresis).wantsEffect(
+        return effectPolicy.wantsEffect(
             isEnabled: preferences.isEnabled,
             isActive: isActive,
             angle: angle,
@@ -238,6 +248,7 @@ final class LidController: ObservableObject {
                 memoryDuration: Self.closingMemory
             ),
             isClearlyOpening: angularVelocity >= Self.triggerOpeningSpeed,
+            hasDwelledOpen: openDwell.hasDwelled(at: now, duration: Self.openDwellDuration),
             minimumDurationElapsed: now - startedAt > Self.minimumEffectDuration
         )
     }
@@ -342,6 +353,7 @@ final class LidController: ObservableObject {
         isActive = active
         if active {
             peakAngle = rawAngle
+            openDwell.reset()
             startedAt = CACurrentMediaTime()
             visualAngle.reset(to: rawAngle)
             snapshotter.endPrewarm()
@@ -558,6 +570,7 @@ final class LidController: ObservableObject {
         angularVelocity = 0
         lastClosingTime = -.greatestFiniteMagnitude
         motionIntent.reset()
+        openDwell.reset()
         peakAngle = 0
         if let angle = sensor.angle() {
             rawAngle = angle

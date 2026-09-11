@@ -27,9 +27,35 @@ struct LidMotionIntent {
     }
 }
 
+/// How long the lid has stayed opened back above the start angle.
+struct LidOpenDwell {
+    private(set) var since: TimeInterval?
+
+    mutating func update(angle: Double, at now: TimeInterval, dwellAngle: Double) {
+        if angle >= dwellAngle {
+            if since == nil { since = now }
+        } else {
+            since = nil
+        }
+    }
+
+    func hasDwelled(at now: TimeInterval, duration: TimeInterval) -> Bool {
+        guard let since else { return false }
+        return now - since >= duration
+    }
+
+    mutating func reset() {
+        since = nil
+    }
+}
+
 struct LidEffectPolicy {
     let threshold: Double
     let hysteresis: Double
+
+    /// A lid held at or above this angle has been opened again, even when
+    /// threshold + hysteresis is past what the hinge can reach.
+    var dwellAngle: Double { threshold + min(hysteresis, 1) }
 
     func wantsEffect(
         isEnabled: Bool,
@@ -39,6 +65,7 @@ struct LidEffectPolicy {
         hasBeenAboveThreshold: Bool,
         wasClosingRecently: Bool,
         isClearlyOpening: Bool,
+        hasDwelledOpen: Bool,
         minimumDurationElapsed: Bool
     ) -> Bool {
         guard isEnabled else { return false }
@@ -48,6 +75,10 @@ struct LidEffectPolicy {
             // sufficient to recover even when threshold + hysteresis cannot
             // be reached by the hardware.
             if isClearlyOpening, angle >= threshold { return false }
+
+            // An opening slower than that still ends with the lid held above
+            // the start angle, which releases it too.
+            if hasDwelledOpen { return false }
 
             // Keep the ordinary release hysteresis for stationary readings and
             // sensor jitter around the start angle.

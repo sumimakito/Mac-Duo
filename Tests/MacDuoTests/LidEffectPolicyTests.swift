@@ -53,6 +53,7 @@ struct LidEffectPolicyTests {
                 hasBeenAboveThreshold: true,
                 wasClosingRecently: intent.wasClosingRecently(at: 10.3, memoryDuration: 1.5),
                 isClearlyOpening: false,
+                hasDwelledOpen: false,
                 minimumDurationElapsed: true
             )
         )
@@ -69,20 +70,43 @@ struct LidEffectPolicyTests {
                 hasBeenAboveThreshold: true,
                 wasClosingRecently: false,
                 isClearlyOpening: false,
+                hasDwelledOpen: false,
                 minimumDurationElapsed: true
             )
         )
     }
 
+    @Test
+    func testSlowOpeningReleasesAfterDwell() {
+        #expect(activeEffect(angle: 133, opening: false))
+        #expect(!activeEffect(angle: 133, opening: false, dwelled: true))
+    }
+
+    @Test
+    func testDwellRestartsWhenLidDropsBelowDwellAngle() {
+        let dwellAngle = highThreshold.dwellAngle
+        var dwell = LidOpenDwell()
+        dwell.update(angle: 131, at: 10, dwellAngle: dwellAngle)
+        #expect(!dwell.hasDwelled(at: 10.5, duration: 1))
+        #expect(dwell.hasDwelled(at: 11, duration: 1))
+
+        // Jitter back toward the start angle restarts the wait.
+        dwell.update(angle: 130.5, at: 11.1, dwellAngle: dwellAngle)
+        dwell.update(angle: 131, at: 11.2, dwellAngle: dwellAngle)
+        #expect(!dwell.hasDwelled(at: 12, duration: 1))
+    }
+
     private func activeEffect(
         angle: Double,
         opening: Bool,
+        dwelled: Bool = false,
         minimumDurationElapsed: Bool = true
     ) -> Bool {
         wantsActiveEffect(
             policy: highThreshold,
             angle: angle,
             opening: opening,
+            dwelled: dwelled,
             minimumDurationElapsed: minimumDurationElapsed
         )
     }
@@ -91,6 +115,7 @@ struct LidEffectPolicyTests {
         policy: LidEffectPolicy,
         angle: Double,
         opening: Bool,
+        dwelled: Bool = false,
         minimumDurationElapsed: Bool = true
     ) -> Bool {
         policy.wantsEffect(
@@ -101,6 +126,7 @@ struct LidEffectPolicyTests {
             hasBeenAboveThreshold: true,
             wasClosingRecently: false,
             isClearlyOpening: opening,
+            hasDwelledOpen: dwelled,
             minimumDurationElapsed: minimumDurationElapsed
         )
     }
