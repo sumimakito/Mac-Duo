@@ -16,11 +16,11 @@
 "Blur" = "模糊强度";
 "Blur radius at the far edge." = "画面远端边缘的模糊半径。";
 "Blur spread" = "模糊范围";
-"0 blurs the far edge only, 100 the whole picture." = "0 仅模糊远端边缘，100 则模糊整个画面。";
+"0 blurs the far edge only, 100 the whole picture." = "合盖时模糊从远端往下长。0 只糊后倾的上沿，100 则整幅一起糊。";
 "Dimming" = "变暗强度";
 "How dark the far edge goes." = "画面远端边缘的变暗程度。";
 "Dimming spread" = "变暗范围";
-"Everything above this height goes fully dark." = "此高度以上的画面达到最大变暗强度。";
+"Everything above this height goes fully dark." = "合盖时暗部从远端往转轴延伸的速度。调低则覆盖更大，调高则主要暗在上沿。";
 "Perspective" = "透视";
 "Lean back" = "后倾幅度";
 "Degrees of lean per degree of closing. 1 holds it still." = "每合上 1° 时画面的后倾角度。设为 1 时，画面在空间中保持不动。";

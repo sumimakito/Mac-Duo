@@ -20,20 +20,35 @@ struct DepthGeometry {
     /// Past 90 degrees the picture turns its face away from the glass.
     var maxSeparationDegrees: Double = 88
 
-    /// Bottom-left, bottom-right, top-right, top-left.
-    func corners(
+    /// One pose of the receding picture, shared by the projection and the
+    /// lighting so dimming follows the same lid travel as the warp.
+    struct Pose {
+        /// Bottom-left, bottom-right, top-right, top-left.
+        var corners: [CGPoint]
+        var sinSeparation: Double
+        var cosSeparation: Double
+        /// Eye position in glass coordinates, in points. Hinge at the origin,
+        /// +Y along the glass, +Z away from the glass toward the far side of
+        /// the picture's tilt.
+        var eyeAlong: Double
+        var eyeDepth: Double
+    }
+
+    func pose(
         startAngle: Double,
         currentAngle: Double,
         viewingDistanceRatio: Double,
         recession: Double,
         screenSize: CGSize
-    ) -> [CGPoint] {
+    ) -> Pose {
         let width = Double(screenSize.width)
         let height = Double(screenSize.height)
         let start = startAngle * .pi / 180
         let current = currentAngle * .pi / 180
         let travel = max(startAngle - currentAngle, 0)
         let separation = min(recession * travel, maxSeparationDegrees) * .pi / 180
+        let sinSeparation = sin(separation)
+        let cosSeparation = cos(separation)
 
         // The eye in world axes, hinge at the origin.
         let reach = height * viewingDistanceRatio + height / 2 * cos(start)
@@ -45,13 +60,19 @@ struct DepthGeometry {
 
         let half = width / 2
         func project(_ x: Double, _ y: Double) -> CGPoint {
-            let scale = depth / (depth + y * sin(separation))
+            let scale = depth / (depth + y * sinSeparation)
             return CGPoint(
                 x: half + (x - half) * scale,
-                y: along + (y * cos(separation) - along) * scale
+                y: along + (y * cosSeparation - along) * scale
             )
         }
-        return [project(0, 0), project(width, 0), project(width, height), project(0, height)]
+        return Pose(
+            corners: [project(0, 0), project(width, 0), project(width, height), project(0, height)],
+            sinSeparation: sinSeparation,
+            cosSeparation: cosSeparation,
+            eyeAlong: along,
+            eyeDepth: depth
+        )
     }
 }
 
@@ -270,21 +291,23 @@ final class DepthOverlay {
     func update(progress: Double, currentAngle: Double, tuning: DepthTuning) {
         guard let renderer, renderer.isReady else { return }
         self.tuning = tuning
+        let pose = geometry.pose(
+            startAngle: startAngle,
+            currentAngle: currentAngle,
+            viewingDistanceRatio: tuning.viewingDistance,
+            recession: tuning.recession,
+            screenSize: screenSize
+        )
         renderer.render(
-            corners: geometry.corners(
-                startAngle: startAngle,
-                currentAngle: currentAngle,
-                viewingDistanceRatio: tuning.viewingDistance,
-                recession: tuning.recession,
-                screenSize: screenSize
-            ),
+            corners: pose.corners,
             blurStrength: gradient.blurStrength(progress: progress),
             dimStrength: gradient.dimStrength(progress: progress),
             hingeFloor: tuning.blurEvenness,
             dimHingeFloor: gradient.dimHingeFloor,
             dimReach: tuning.dimReach,
             maxBlurRadius: tuning.maxBlurRadius,
-            maxDim: tuning.maxDim
+            maxDim: tuning.maxDim,
+            pose: pose
         )
     }
 

@@ -85,14 +85,15 @@ final class Preferences: ObservableObject {
         didSet { defaults.set(recession, forKey: Key.recession) }
     }
 
-    /// Blur at the hinge edge as a fraction of the blur at the far edge. One
-    /// blurs the whole picture by the same amount.
+    /// How evenly the lid-driven blur covers the picture. Zero keeps the
+    /// hinge sharp and blurs the receding far edge; one blurs everything.
     @Published var blurEvenness: Double {
         didSet { defaults.set(blurEvenness, forKey: Key.blurEvenness) }
     }
 
-    /// Height at which the dimming reaches full strength, as a fraction of
-    /// the screen height.
+    /// How quickly darkness grows from the far edge toward the hinge as the
+    /// lid closes. Lower covers more of the picture; it is no longer a hard
+    /// screen-height cutoff.
     @Published var dimReach: Double {
         didSet { defaults.set(dimReach, forKey: Key.dimReach) }
     }
