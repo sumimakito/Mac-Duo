@@ -24,5 +24,11 @@ let package = Package(
             path: "Sources/lidprobe",
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
+        .testTarget(
+            name: "LidAngleKitTests",
+            dependencies: ["LidAngleKit"],
+            path: "Tests/LidAngleKitTests",
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
     ]
 )

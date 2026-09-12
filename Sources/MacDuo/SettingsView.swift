@@ -113,7 +113,8 @@ struct SettingsView: View {
                 help: localized("Ends the effect once the angle stops changing.")
             )
             slider(
-                localized("Start angle"), value: $preferences.thresholdAngle, in: 5...130, format: "%.0f°",
+                localized("Start angle"), value: $preferences.thresholdAngle,
+                in: Preferences.minThresholdAngle...preferences.maxThresholdAngle, format: "%.0f°",
                 help: localized("The effect starts at this angle.")
             )
             slider(
