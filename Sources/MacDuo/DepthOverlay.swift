@@ -157,7 +157,6 @@ final class DepthOverlay {
         fadeIn: TimeInterval
     ) -> Bool {
         dismiss(animated: false)
-        guard let displayID = screen.displayID, displayID == NSScreen.builtIn?.displayID else { return false }
         guard warmUp(), let renderer else { return false }
         self.startAngle = startAngle
         self.tuning = tuning
@@ -198,6 +197,8 @@ final class DepthOverlay {
         fadeIn: TimeInterval
     ) {
         dismiss(animated: false)
+        // The screenshot's screen can be stale once the lid shuts into
+        // clamshell mode, so no window goes up at its old frame.
         guard let displayID = screen.displayID, displayID == NSScreen.builtIn?.displayID else { return }
         guard warmUp(), let renderer else { return }
         self.startAngle = startAngle

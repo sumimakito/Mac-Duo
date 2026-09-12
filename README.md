@@ -57,7 +57,7 @@ macOS may require Screen Recording permission again after rebuilding with ad-hoc
 ## Known limitations
 
 - Only MacBooks with a compatible lid angle sensor can use the effect. The app reports when no sensor is available.
-- Sensor discovery requires an Apple orientation sensor marked as built-in by macOS and a supported angle report, without relying on a specific product ID. External display sensors are excluded.
+- The sensor must be one macOS marks as built-in. An external display with a similar sensor is ignored.
 - The effect applies only to the built-in display.
 - The effect stops when macOS sleeps as the lid closes.
 - Clicks pass through the effect to the apps underneath.

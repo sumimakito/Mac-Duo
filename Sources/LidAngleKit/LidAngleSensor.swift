@@ -4,8 +4,9 @@ import IOKit.hid
 
 /// Reads the lid hinge angle from the MacBook orientation sensor.
 ///
-/// Discovers Apple's built-in orientation sensors on HID usage page `0x20`,
-/// usage `0x8A`, without requiring a specific product ID. Supported angle reports use
+/// The sensor is an Apple HID device on usage page `0x20`, usage `0x8A`, that
+/// macOS marks as built-in. No product ID is required, and an external display
+/// with the same usage is left out. Two reports carry the angle, both through
 /// `kIOHIDReportTypeFeature`:
 ///
 /// - Report 1: 3 bytes `[0x01, lo, hi]`, whole degrees, 0...360.
@@ -114,7 +115,8 @@ public final class LidAngleSensor {
 
         guard let devices = IOHIDManagerCopyDevices(manager) as? Set<IOHIDDevice> else { return }
         for candidate in devices {
-            guard (IOHIDDeviceGetProperty(candidate, "Built-In" as CFString) as? NSNumber)?.boolValue == true else {
+            // An external display can carry the same usage and reads 0.
+            guard (IOHIDDeviceGetProperty(candidate, kIOHIDBuiltInKey as CFString) as? NSNumber)?.boolValue == true else {
                 continue
             }
             device = candidate
