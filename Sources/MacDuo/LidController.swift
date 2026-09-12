@@ -49,7 +49,8 @@ final class LidController: ObservableObject {
     private var preview: PreviewRun?
     private var isSuspended = false
     private var isCapturePending = false
-    private var lastMovedDownTime: CFTimeInterval = -.greatestFiniteMagnitude
+    private var motionIntent = LidMotionIntent()
+    private var openDwell = LidOpenDwell()
     /// Where the lid last moved to by more than `timeoutMovementThreshold`,
     /// and when. The timeout counts from there.
     private var timeoutReferenceAngle: Double?
@@ -64,6 +65,7 @@ final class LidController: ObservableObject {
     private var isClosingOut = false
     private var closingOutStartedAt: CFTimeInterval = 0
     private var builtInLayout = Layout()
+    private var peakAngle: Double = 0
 
     private static let idlePollInterval: TimeInterval = 1.0 / 8
     private static let activePollInterval: TimeInterval = 1.0 / 30
@@ -75,6 +77,9 @@ final class LidController: ObservableObject {
     /// A still lid reads under 0.5.
     private static let triggerClosingSpeed: Double = 2
 
+    /// Opening speed that counts as a deliberate reversal, in degrees per second.
+    private static let triggerOpeningSpeed: Double = 2
+
     /// How long after the lid last moved down the effect may still start.
     private static let closingMemory: TimeInterval = 1.5
 
@@ -83,9 +88,14 @@ final class LidController: ObservableObject {
     /// Sensor latency the prediction adds on top of the reading's own age.
     private static let predictionLatency: TimeInterval = 0.04
 
-    /// The overlay stays up at least this long. A prediction can fire while the
-    /// last reading is still above the release angle.
+    /// The ordinary hysteresis release waits this long. A prediction can fire
+    /// while the last reading is still above the trigger angle, but deliberate
+    /// opening is allowed to release immediately.
     private static let minimumEffectDuration: TimeInterval = 0.35
+
+    /// How long a lid held above the start angle waits before it counts as
+    /// opened again, for openings slower than `triggerOpeningSpeed`.
+    private static let openDwellDuration: TimeInterval = 1
 
     /// Movement within this many degrees counts as holding still.
     private static let timeoutMovementThreshold: Double = 2
@@ -191,7 +201,9 @@ final class LidController: ObservableObject {
         lastChangedAngle = nil
         angularVelocity = 0
         lastClosingTime = -.greatestFiniteMagnitude
-        lastMovedDownTime = -.greatestFiniteMagnitude
+        motionIntent.reset()
+        openDwell.reset()
+        peakAngle = 0
         if pollTimer != nil { setPollInterval(Self.idlePollInterval) }
     }
 
@@ -202,7 +214,10 @@ final class LidController: ObservableObject {
         // a real close does.
         preview = PreviewRun(
             startedAt: CACurrentMediaTime(),
-            open: min(preferences.thresholdAngle + 35, 130),
+            open: max(
+                preferences.thresholdAngle + preferences.hysteresis + 5,
+                min(preferences.thresholdAngle + 35, 130)
+            ),
             shut: max(preferences.thresholdAngle - preferences.blurSpan * 1.15, 5)
         )
         setPollInterval(Self.activePollInterval)
@@ -228,6 +243,8 @@ final class LidController: ObservableObject {
         if let run = preview {
             guard let scripted = run.angle(at: CACurrentMediaTime()) else {
                 preview = nil
+                peakAngle = 0
+                if isActive { setActive(false) }
                 return
             }
             angle = scripted
@@ -255,10 +272,12 @@ final class LidController: ObservableObject {
         }
 
         rawAngle = angle
+        peakAngle = max(peakAngle, angle)
         publish(angle: angle)
 
         if preferences.isEnabled {
             updateVelocity(with: angle)
+            openDwell.update(angle: angle, at: CACurrentMediaTime(), dwellAngle: effectPolicy.dwellAngle)
             reconcile(angle: angle)
         }
 
@@ -266,6 +285,10 @@ final class LidController: ObservableObject {
         let wantsFastPolling = preferences.isEnabled
             && (preview != nil || isActive || angle <= prewarmZone + Self.fastPollMargin)
         setPollInterval(wantsFastPolling ? Self.activePollInterval : Self.idlePollInterval)
+    }
+
+    private var effectPolicy: LidEffectPolicy {
+        LidEffectPolicy(threshold: preferences.thresholdAngle, hysteresis: preferences.hysteresis)
     }
 
     /// Whether the picture belongs on screen for this angle. It widens the
@@ -279,25 +302,37 @@ final class LidController: ObservableObject {
             wasTimeoutEnabled = preferences.isTimeoutEnabled
         }
 
+        let now = CACurrentMediaTime()
         let threshold = preferences.thresholdAngle
-        if isActive {
-            guard CACurrentMediaTime() - startedAt > Self.minimumEffectDuration else { return true }
-            if angle >= threshold + preferences.hysteresis { return false }
-            if preferences.isTimeoutEnabled, isPastTimeout(angle: angle) {
-                timeoutAwaitingRelease = true
-                return false
-            }
-            return true
-        }
+        let minimumDurationElapsed = now - startedAt > Self.minimumEffectDuration
 
-        if preferences.isTimeoutEnabled, timeoutAwaitingRelease {
+        if !isActive, preferences.isTimeoutEnabled, timeoutAwaitingRelease {
             guard angle >= threshold else { return false }
             timeoutAwaitingRelease = false
         }
 
-        // A lid resting below the angle must not start by itself.
-        let closing = CACurrentMediaTime() - lastMovedDownTime < Self.closingMemory
-        return closing && predictedAngle() <= threshold
+        let wanted = effectPolicy.wantsEffect(
+            isEnabled: preferences.isEnabled,
+            isActive: isActive,
+            angle: angle,
+            predictedAngle: predictedAngle(),
+            hasBeenAboveThreshold: peakAngle >= threshold,
+            wasClosingRecently: motionIntent.wasClosingRecently(
+                at: now,
+                memoryDuration: Self.closingMemory
+            ),
+            isClearlyOpening: angularVelocity >= Self.triggerOpeningSpeed,
+            hasDwelledOpen: openDwell.hasDwelled(at: now, duration: Self.openDwellDuration),
+            minimumDurationElapsed: minimumDurationElapsed
+        )
+
+        // The timeout only cuts short a run the policy would keep showing.
+        if isActive, wanted, minimumDurationElapsed,
+           preferences.isTimeoutEnabled, isPastTimeout(angle: angle) {
+            timeoutAwaitingRelease = true
+            return false
+        }
+        return wanted
     }
 
     /// True once the angle has held within `timeoutMovementThreshold` of its
@@ -331,6 +366,7 @@ final class LidController: ObservableObject {
             return
         }
         if isActive {
+            if preferences.isLivePicture { streamer.start() }
             if !overlay.isVisible, !isCapturePending { presentPicture() }
             // A visible overlay with no link would sit at its first frame.
             if overlay.isVisible, displayLink == nil { startDisplayLink() }
@@ -359,10 +395,15 @@ final class LidController: ObservableObject {
         } else if now - lastChangeTime > 0.4 {
             angularVelocity = 0
         }
-        if angularVelocity <= -Self.triggerClosingSpeed {
-            lastMovedDownTime = now
-        }
-        if angularVelocity <= -preferences.closingSpeed {
+        motionIntent.update(
+            angularVelocity: angularVelocity,
+            at: now,
+            closingSpeed: Self.triggerClosingSpeed,
+            openingSpeed: Self.triggerOpeningSpeed
+        )
+        if angularVelocity >= Self.triggerOpeningSpeed {
+            lastClosingTime = -.greatestFiniteMagnitude
+        } else if angularVelocity <= -preferences.closingSpeed {
             lastClosingTime = now
         }
     }
@@ -409,6 +450,8 @@ final class LidController: ObservableObject {
     private func setActive(_ active: Bool) {
         isActive = active
         if active {
+            peakAngle = rawAngle
+            openDwell.reset()
             isClosingOut = false
             startedAt = CACurrentMediaTime()
             if preferences.isTimeoutEnabled {
@@ -666,7 +709,9 @@ final class LidController: ObservableObject {
         lastChangedAngle = nil
         angularVelocity = 0
         lastClosingTime = -.greatestFiniteMagnitude
-        lastMovedDownTime = -.greatestFiniteMagnitude
+        motionIntent.reset()
+        openDwell.reset()
+        peakAngle = 0
         timeoutReferenceAngle = nil
         timeoutAwaitingRelease = false
         wasTimeoutEnabled = false
