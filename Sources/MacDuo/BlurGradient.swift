@@ -1,7 +1,8 @@
 import Foundation
 
-/// How far out of focus the picture is at a given height, and how much light
-/// it has lost. Height is 0 at the hinge edge and 1 at the far edge.
+/// How far out of focus the picture is, and how much light it has lost, as
+/// the lid travels. Spatial falloff lives in the shader so blur and dim
+/// follow the same receded-depth pose.
 struct BlurGradient {
 
     /// Exponent on the closing travel. Values above 1 start slowly.

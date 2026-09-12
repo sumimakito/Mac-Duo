@@ -16,11 +16,11 @@
 "Blur" = "Blur";
 "Blur radius at the far edge." = "Blur radius at the far edge.";
 "Blur spread" = "Blur spread";
-"0 blurs the far edge only, 100 the whole picture." = "0 blurs the far edge only, 100 the whole picture.";
+"0 blurs the far edge only, 100 the whole picture." = "Blur grows down from the far edge as the lid closes. 0 keeps the hinge sharp; 100 blurs the whole picture.";
 "Dimming" = "Dimming";
 "How dark the far edge goes." = "How dark the far edge goes.";
 "Dimming spread" = "Dimming spread";
-"Everything above this height goes fully dark." = "Everything above this height goes fully dark.";
+"Everything above this height goes fully dark." = "How quickly darkness grows down from the far edge as the lid closes. Lower covers more of the screen; higher keeps it near the top.";
 "Perspective" = "Perspective";
 "Lean back" = "Lean back";
 "Degrees of lean per degree of closing. 1 holds it still." = "Degrees of lean per degree of closing. 1 holds it still.";
