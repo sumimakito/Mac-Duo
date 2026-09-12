@@ -145,8 +145,9 @@ final class LidController: ObservableObject {
             currentAngle = angle
             visualAngle.reset(to: angle)
         }
-        setPollInterval(Self.idlePollInterval)
+        // Before the first poll, which reads it.
         builtInLayout = Layout(displayID: NSScreen.builtIn?.displayID, frame: NSScreen.builtIn?.frame)
+        setPollInterval(Self.idlePollInterval)
         observeSystemEvents()
         DistributedNotificationCenter.default().addObserver(
             forName: Notification.Name("to.maki.MacDuo.preview"),
@@ -272,7 +273,9 @@ final class LidController: ObservableObject {
     /// angle for release and keeps a lid held below the angle showing, unless
     /// the timeout ends it first.
     private func wantsEffect(angle: Double) -> Bool {
-        guard preferences.isEnabled else { return false }
+        // `builtInLayout` is kept current by the screen change observer, so
+        // this does not enumerate the screens on every sample.
+        guard preferences.isEnabled, builtInLayout.displayID != nil else { return false }
         if preferences.isTimeoutEnabled != wasTimeoutEnabled {
             timeoutReferenceAngle = nil
             timeoutAwaitingRelease = false
