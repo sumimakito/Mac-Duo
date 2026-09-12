@@ -252,6 +252,9 @@ final class LidController: ObservableObject {
                 )
             }
             consecutiveFailedReads = 0
+            // Only a real reading widens the known hinge range. A scripted
+            // preview must not teach the app an angle the lid cannot reach.
+            preferences.noteObserved(angle: read)
             angle = read
         }
 
@@ -285,7 +288,7 @@ final class LidController: ObservableObject {
         let threshold = preferences.thresholdAngle
         if isActive {
             guard CACurrentMediaTime() - startedAt > Self.minimumEffectDuration else { return true }
-            if angle >= threshold + preferences.hysteresis { return false }
+            if angle >= releaseAngle(for: threshold) { return false }
             if preferences.isTimeoutEnabled, isPastTimeout(angle: angle) {
                 timeoutAwaitingRelease = true
                 return false
@@ -301,6 +304,17 @@ final class LidController: ObservableObject {
         // A lid resting below the angle must not start by itself.
         let closing = CACurrentMediaTime() - lastMovedDownTime < Self.closingMemory
         return closing && predictedAngle() <= threshold
+    }
+
+    /// The angle an active effect lets go at.
+    ///
+    /// The hysteresis that keeps the picture from flickering at the boundary
+    /// is held inside the range the lid has been seen to reach, so a start
+    /// angle near the hinge stop cannot ask for an angle that does not exist.
+    /// Without this a threshold of 130 waits for 134 degrees on a hinge that
+    /// stops at 132, and the picture stays up for good.
+    private func releaseAngle(for threshold: Double) -> Double {
+        preferences.angleRange.releaseAngle(startingAt: threshold)
     }
 
     /// True once the angle has held within `timeoutMovementThreshold` of its
@@ -334,6 +348,13 @@ final class LidController: ObservableObject {
             return
         }
         if isActive {
+            // The pre-warm owns the stream, and it only runs while the lid is
+            // closing. An effect that starts after the lid has settled would
+            // otherwise keep the one seeded screenshot for as long as it is up,
+            // which reads as a frozen screen. Live rendering has to hold the
+            // stream for itself while the picture is on show. `start()` is a
+            // no-op once running.
+            if preferences.isLivePicture { streamer.start() }
             if !overlay.isVisible, !isCapturePending { presentPicture() }
             // A visible overlay with no link would sit at its first frame.
             if overlay.isVisible, displayLink == nil { startDisplayLink() }

@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import LidAngleKit
 
 /// User settings, backed by `UserDefaults`.
 @MainActor
@@ -19,7 +20,11 @@ final class Preferences: ObservableObject {
         static let dimReach = "dimReach"
         static let showsAngleInMenuBar = "showsAngleInMenuBar"
         static let isLivePicture = "isLivePicture"
+        static let observedMaxAngle = "observedMaxAngle"
 
+        // `observedMaxAngle` is left out on purpose. It measures the hinge
+        // rather than stating a preference, and forgetting it would hand back
+        // a start angle the lid cannot open past.
         static let all = [
             isEnabled, isTimeoutEnabled, thresholdAngle, blurSpan, maxBlurRadius,
             maxDim, viewingDistance, recession, blurEvenness, dimReach,
@@ -29,7 +34,10 @@ final class Preferences: ObservableObject {
 
     private static let factory: [String: Any] = [
         Key.isEnabled: true,
-        Key.isTimeoutEnabled: false,
+        // On by default. It is the only release the lid can reach without
+        // opening all the way, and a user who needs it is by then looking at
+        // a picture that hides the panel holding the switch.
+        Key.isTimeoutEnabled: true,
         Key.thresholdAngle: 90.0,
         Key.blurSpan: 60.0,
         Key.maxBlurRadius: 135.0,
@@ -40,6 +48,7 @@ final class Preferences: ObservableObject {
         Key.dimReach: 0.5,
         Key.showsAngleInMenuBar: false,
         Key.isLivePicture: true,
+        Key.observedMaxAngle: 0.0,
     ]
 
     /// Master switch for the depth effect.
@@ -108,6 +117,13 @@ final class Preferences: ObservableObject {
         didSet { defaults.set(isLivePicture, forKey: Key.isLivePicture) }
     }
 
+    /// Widest angle the sensor has reported on this Mac, or zero before the
+    /// first reading. Hinges differ by model, and nothing in the sensor
+    /// reports the range, so it is learned and remembered.
+    @Published private(set) var observedMaxAngle: Double {
+        didSet { defaults.set(observedMaxAngle, forKey: Key.observedMaxAngle) }
+    }
+
     /// Eye distance in screen heights, at the two ends of the perspective
     /// slider. The panel offers the strength, which runs the other way.
     static let farthestEye: Double = 6
@@ -128,6 +144,54 @@ final class Preferences: ObservableObject {
 
     /// Degrees above the threshold before the overlay is released.
     let hysteresis: Double = 4
+
+    /// Degrees kept clear of the widest angle seen, so letting go never asks
+    /// the lid to be pressed against its hard stop.
+    let reachMargin: Double = 1
+
+    /// A reading wider than this is sensor noise, not a wider hinge.
+    let plausibleMaxAngle: Double = 150
+
+    /// Lowest start angle the panel offers.
+    static let minThresholdAngle: Double = 5
+
+    /// Stands in for the hinge before the first reading arrives. The sensor
+    /// header puts a MacBook at roughly this much.
+    static let assumedMaxAngle: Double = 130
+
+    /// The reachable angle band, rebuilt from what the sensor has reported.
+    var angleRange: LidAngleRange {
+        LidAngleRange(
+            observedMax: observedMaxAngle,
+            hysteresis: hysteresis,
+            reachMargin: reachMargin,
+            assumedMax: Self.assumedMaxAngle,
+            minThreshold: Self.minThresholdAngle
+        )
+    }
+
+    /// Widest angle an active effect may be asked to release at. Anything
+    /// beyond it is a release the hinge cannot perform.
+    var releaseCeiling: Double { angleRange.releaseCeiling }
+
+    /// Highest start angle the panel offers, so the release that follows from
+    /// it stays inside `releaseCeiling`.
+    var maxThresholdAngle: Double { angleRange.maxThreshold }
+
+    /// Widens the known hinge range. Fed every sensor reading.
+    func noteObserved(angle: Double) {
+        guard angle > observedMaxAngle, angle <= plausibleMaxAngle else { return }
+        observedMaxAngle = angle
+    }
+
+    /// Pulls a stored start angle back into the range the hinge can leave.
+    /// Values from an earlier version, or written straight to the plist, can
+    /// sit above it.
+    func clampThresholdAngle() {
+        let bounded = angleRange.clamped(threshold: thresholdAngle)
+        guard bounded != thresholdAngle else { return }
+        thresholdAngle = bounded
+    }
 
     /// Settings from earlier versions, removed at launch.
     private static let retired = [
@@ -154,6 +218,8 @@ final class Preferences: ObservableObject {
         dimReach = defaults.double(forKey: Key.dimReach)
         showsAngleInMenuBar = defaults.bool(forKey: Key.showsAngleInMenuBar)
         isLivePicture = defaults.bool(forKey: Key.isLivePicture)
+        observedMaxAngle = defaults.double(forKey: Key.observedMaxAngle)
+        clampThresholdAngle()
     }
 
     func resetToDefaults() {
@@ -172,5 +238,6 @@ final class Preferences: ObservableObject {
         dimReach = defaults.double(forKey: Key.dimReach)
         showsAngleInMenuBar = defaults.bool(forKey: Key.showsAngleInMenuBar)
         isLivePicture = defaults.bool(forKey: Key.isLivePicture)
+        clampThresholdAngle()
     }
 }
