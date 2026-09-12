@@ -57,7 +57,7 @@ echo "built ${BUNDLE}"
 codesign -dv "$BUNDLE" 2>&1 | grep -E "Identifier|TeamIdentifier|Signature" || true
 
 if "$RUN_APP"; then
-  pkill -x MacDuo 2>/dev/null || true
+  pkill -f -x "$PWD/$BUNDLE/Contents/MacOS/MacDuo" 2>/dev/null || true
   sleep 0.5
   open "$BUNDLE"
   echo "launched"
