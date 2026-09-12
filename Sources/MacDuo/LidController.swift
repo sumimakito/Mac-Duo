@@ -33,6 +33,8 @@ final class LidController: ObservableObject {
     private var pictureTask: Task<Void, Never>?
     private var pollTimer: Timer?
     private var pollInterval: TimeInterval = 0
+    /// The user picture for this run, picked once when the effect starts.
+    private var activeOverlay: CGImage?
     private var displayLink: CADisplayLink?
     private var lastFrameTime: CFTimeInterval = 0
     private var lastPublishTime: CFTimeInterval = 0
@@ -178,6 +180,7 @@ final class LidController: ObservableObject {
         pictureTask = nil
         isCapturePending = false
         isClosingOut = false
+        activeOverlay = nil
         stopDisplayLink()
         overlay.dismiss(animated: false)
         snapshotter.stop()
@@ -414,6 +417,7 @@ final class LidController: ObservableObject {
         if active {
             isClosingOut = false
             startedAt = CACurrentMediaTime()
+            activeOverlay = pickOverlay()
             if preferences.isTimeoutEnabled {
                 timeoutReferenceAngle = rawAngle
                 timeoutReferenceTime = startedAt
@@ -457,12 +461,21 @@ final class LidController: ObservableObject {
     /// already running counts as that wait.
     private func presentPicture() {
         guard preferences.isEnabled, !isSuspended, isActive else { return }
+        // A replacement picture is still by nature: it stands in for the
+        // screen instead of streaming it.
+        if overlayMode == .replace, let picture = activeOverlay, let screen = NSScreen.builtIn {
+            streamer.stop()
+            show(image: picture, on: screen)
+            return
+        }
+        let topOverlay = overlayMode == .onTop ? activeOverlay : nil
         if preferences.isLivePicture, let screen = NSScreen.builtIn,
            overlay.showLive(
                on: screen,
                startAngle: preferences.thresholdAngle,
                tuning: tuning,
-               fadeIn: Self.fadeInDuration
+               fadeIn: Self.fadeInDuration,
+               overlay: topOverlay
            ) {
             startDisplayLink()
             if let frame = streamer.newFrame() {
@@ -483,7 +496,7 @@ final class LidController: ObservableObject {
         }
 
         if let image = snapshotter.latestImage, let screen = snapshotter.latestScreen {
-            show(image: image, on: screen)
+            show(image: image, on: screen, overlay: topOverlay)
             return
         }
         isCapturePending = true
@@ -503,7 +516,7 @@ final class LidController: ObservableObject {
             guard self.isActive, !self.overlay.isVisible,
                   let image = self.snapshotter.latestImage,
                   let screen = self.snapshotter.latestScreen else { return }
-            self.show(image: image, on: screen)
+            self.show(image: image, on: screen, overlay: topOverlay)
         }
     }
 
@@ -532,13 +545,14 @@ final class LidController: ObservableObject {
         }
     }
 
-    private func show(image: CGImage, on screen: NSScreen) {
+    private func show(image: CGImage, on screen: NSScreen, overlay topOverlay: CGImage? = nil) {
         overlay.show(
             image: image,
             on: screen,
             startAngle: preferences.thresholdAngle,
             tuning: tuning,
-            fadeIn: Self.fadeInDuration
+            fadeIn: Self.fadeInDuration,
+            overlay: topOverlay
         )
         // The link belongs to the overlay window.
         startDisplayLink()
@@ -614,6 +628,21 @@ final class LidController: ObservableObject {
             maxBlurRadius: preferences.maxBlurRadius,
             maxDim: preferences.maxDim
         )
+    }
+
+    private var overlayMode: OverlayMode {
+        OverlayMode(rawValue: preferences.overlayMode) ?? .off
+    }
+
+    /// One random library picture for this run, or `nil` for the screen
+    /// alone. An enabled mode with an empty library falls back silently.
+    private func pickOverlay() -> CGImage? {
+        guard overlayMode != .off else { return nil }
+        let image = OverlayImageStore.shared.randomCGImage()
+        if image == nil {
+            Diagnostics.lid.notice("pictures enabled but the library is empty, showing the screen alone")
+        }
+        return image
     }
 
     // MARK: - System events

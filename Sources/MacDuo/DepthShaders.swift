@@ -21,6 +21,8 @@ enum DepthShaders {
         float4 paddedAndBlur;    // padded size, max radius in pixels, blur strength
         float4 shape;            // blur floor, max dim, pixel scale, max level
         float4 light;            // dim floor, dim strength, dim reach, unused
+        float4 overlayRect;      // user picture rect in picture points, w <= 0 disables
+        float4 overlayInfo;      // overlay pyramid max level, unused, unused, unused
     };
 
     vertex float4 depthVertex(uint vertexID [[vertex_id]]) {
@@ -30,7 +32,8 @@ enum DepthShaders {
 
     fragment float4 depthFragment(float4 position [[position]],
                                    constant Uniforms &uniforms [[buffer(0)]],
-                                   texture2d<float> picture [[texture(0)]]) {
+                                   texture2d<float> picture [[texture(0)]],
+                                   texture2d<float> overlay [[texture(1)]]) {
         constexpr sampler linearSampler(filter::linear, mip_filter::linear, address::clamp_to_edge);
 
         float2 screenSize = uniforms.screenAndOrigin.xy;
@@ -70,6 +73,16 @@ enum DepthShaders {
         float mipLevel = clamp(log2(max(blur * maxRadius, 1.0)), 0.0, maxLevel);
 
         float4 colour = picture.sample(linearSampler, texCoord, level(mipLevel));
+        // A user picture composited into the picture space, so it leans, blurs
+        // and dims with the screen content under the same depth gradient.
+        if (uniforms.overlayRect.z > 0.0 && uniforms.overlayRect.w > 0.0) {
+            float2 anchor = (picturePoint - uniforms.overlayRect.xy) / uniforms.overlayRect.zw;
+            if (anchor.x >= 0.0 && anchor.x <= 1.0 && anchor.y >= 0.0 && anchor.y <= 1.0) {
+                float overlayLevel = clamp(mipLevel, 0.0, uniforms.overlayInfo.x);
+                float4 over = overlay.sample(linearSampler, float2(anchor.x, 1.0 - anchor.y), level(overlayLevel));
+                colour.rgb = mix(colour.rgb, over.rgb, over.a);
+            }
+        }
         // smoothstep rather than a clamped ratio, so the height where the
         // dimming reaches full strength leaves no visible edge.
         float spread = smoothstep(0.0, max(dimReach, 0.02), height);

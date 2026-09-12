@@ -23,6 +23,8 @@ final class DepthRenderer {
         var paddedAndBlur: SIMD4<Float>
         var shape: SIMD4<Float>
         var light: SIMD4<Float>
+        var overlayRect: SIMD4<Float>
+        var overlayInfo: SIMD4<Float>
     }
 
     /// One held picture, built off the main thread and adopted on it.
@@ -34,6 +36,14 @@ final class DepthRenderer {
         let maxLevel: Float
         let pixelScale: CGFloat
         let screenSize: CGSize
+    }
+
+    /// One user picture, built off the main thread and adopted on it.
+    struct PreparedOverlay {
+        let texture: MTLTexture
+        let maxLevel: Float
+        let pixelWidth: Int
+        let pixelHeight: Int
     }
 
     /// Where the next frame goes.
@@ -52,6 +62,13 @@ final class DepthRenderer {
     private var paddedSize: CGSize = .zero
     private var maxLevel: Float = 0
 
+    /// A user picture composited into the picture space. `overlayRect` is in
+    /// picture points with y up from the hinge; a non-positive width disables
+    /// it in the shader.
+    private var overlayTexture: MTLTexture?
+    private var overlayMaxLevel: Float = 0
+    private var overlayRect = SIMD4<Float>(0, 0, 0, 0)
+
     /// The picture a live stream writes into. `makePicture` builds its own
     /// texture instead, so only one of the two is in use at a time.
     private var liveTexture: MTLTexture?
@@ -68,6 +85,7 @@ final class DepthRenderer {
     private lazy var livePyramid = MPSImageGaussianPyramid(device: device, centerWeight: 0.375)
 
     var isReady: Bool { texture != nil }
+    var hasOverlay: Bool { overlayTexture != nil }
 
     init?() {
         guard let device = MTLCreateSystemDefaultDevice(),
@@ -151,12 +169,30 @@ final class DepthRenderer {
         context.setFillColor(CGColor(red: 0, green: 0, blue: 0, alpha: 1))
         context.fill(CGRect(x: 0, y: 0, width: width, height: height))
         let inset = padding * pixelScale
-        context.draw(image, in: CGRect(
+        let dest = CGRect(
             x: inset,
             y: inset,
             width: CGFloat(width) - 2 * inset,
             height: CGFloat(height) - 2 * inset
-        ))
+        )
+        // Screenshots match the screen aspect and draw whole. User pictures
+        // of any shape fill the frame instead of stretching.
+        let destAspect = dest.width / max(dest.height, 1)
+        let sourceAspect = CGFloat(image.width) / max(CGFloat(image.height), 1)
+        var framed = image
+        if abs(sourceAspect - destAspect) > 0.001 {
+            let crop: CGRect
+            if sourceAspect > destAspect {
+                let w = CGFloat(image.height) * destAspect
+                crop = CGRect(x: (CGFloat(image.width) - w) / 2, y: 0, width: w, height: CGFloat(image.height))
+            } else {
+                let h = CGFloat(image.width) / destAspect
+                crop = CGRect(x: 0, y: (CGFloat(image.height) - h) / 2, width: CGFloat(image.width), height: h)
+            }
+            guard let cropped = image.cropping(to: crop.integral) else { return nil }
+            framed = cropped
+        }
+        context.draw(framed, in: dest)
         let drawn = CFAbsoluteTimeGetCurrent()
 
         let levels = Int(floor(log2(Double(max(width, height))))) + 1
@@ -377,6 +413,98 @@ final class DepthRenderer {
         commands.waitUntilCompleted()
     }
 
+    // MARK: - User picture overlay
+
+    /// Uploads one user picture and builds its blur pyramid. Call this off
+    /// the main thread.
+    nonisolated func prepareOverlay(image: CGImage) -> PreparedOverlay? {
+        let width = image.width
+        let height = image.height
+        guard width > 0, height > 0 else { return nil }
+        let byteCount = width * height * 4
+        guard let staging = device.makeBuffer(length: byteCount, options: .storageModeShared) else { return nil }
+
+        let colourSpace: CGColorSpace
+        if let space = image.colorSpace, space.model == .rgb {
+            colourSpace = space
+        } else {
+            colourSpace = CGColorSpaceCreateDeviceRGB()
+        }
+        guard let context = CGContext(
+            data: staging.contents(),
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: width * 4,
+            space: colourSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
+        ) else { return nil }
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+        let levels = Int(floor(log2(Double(max(width, height))))) + 1
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .bgra8Unorm_srgb,
+            width: width,
+            height: height,
+            mipmapped: true
+        )
+        descriptor.usage = [.shaderRead, .shaderWrite]
+        descriptor.storageMode = .private
+        guard var texture = device.makeTexture(descriptor: descriptor),
+              let commands = queue.makeCommandBuffer(),
+              let blit = commands.makeBlitCommandEncoder() else { return nil }
+        blit.copy(
+            from: staging,
+            sourceOffset: 0,
+            sourceBytesPerRow: width * 4,
+            sourceBytesPerImage: byteCount,
+            sourceSize: MTLSize(width: width, height: height, depth: 1),
+            to: texture,
+            destinationSlice: 0,
+            destinationLevel: 0,
+            destinationOrigin: MTLOrigin(x: 0, y: 0, z: 0)
+        )
+        blit.endEncoding()
+        MPSImageGaussianPyramid(device: device, centerWeight: 0.375)
+            .encode(commandBuffer: commands, inPlaceTexture: &texture, fallbackCopyAllocator: nil)
+        commands.commit()
+        commands.waitUntilCompleted()
+        return PreparedOverlay(
+            texture: texture,
+            maxLevel: Float(levels - 1),
+            pixelWidth: width,
+            pixelHeight: height
+        )
+    }
+
+    /// Takes a built user picture. It lands aspect-fit in the middle of the
+    /// screen content, so it leans, blurs and dims with everything else.
+    func adoptOverlay(_ overlay: PreparedOverlay) {
+        guard screenSize.width > 0, screenSize.height > 0 else { return }
+        let boxWidth = screenSize.width * 0.72
+        let boxHeight = screenSize.height * 0.62
+        let aspect = CGFloat(overlay.pixelWidth) / max(CGFloat(overlay.pixelHeight), 1)
+        var rectWidth = min(boxWidth, boxHeight * aspect)
+        var rectHeight = rectWidth / max(aspect, 0.01)
+        if rectHeight > boxHeight {
+            rectHeight = boxHeight
+            rectWidth = rectHeight * aspect
+        }
+        let center = CGPoint(x: screenSize.width / 2, y: screenSize.height * 0.46)
+        overlayTexture = overlay.texture
+        overlayMaxLevel = overlay.maxLevel
+        overlayRect = SIMD4(
+            Float(center.x - rectWidth / 2), Float(center.y - rectHeight / 2),
+            Float(rectWidth), Float(rectHeight)
+        )
+    }
+
+    func clearOverlay() {
+        overlayTexture = nil
+        overlayMaxLevel = 0
+        overlayRect = SIMD4(0, 0, 0, 0)
+    }
+
     // MARK: - Still source
 
     func adopt(_ picture: PreparedPicture) {
@@ -444,7 +572,9 @@ final class DepthRenderer {
                 Float(maxBlurRadius * Double(pixelScale)), Float(blurStrength)
             ),
             shape: SIMD4(Float(hingeFloor), Float(maxDim), Float(pixelScale), maxLevel),
-            light: SIMD4(Float(dimHingeFloor), Float(dimStrength), Float(dimReach), 0)
+            light: SIMD4(Float(dimHingeFloor), Float(dimStrength), Float(dimReach), 0),
+            overlayRect: overlayTexture != nil ? overlayRect : SIMD4(0, 0, 0, 0),
+            overlayInfo: SIMD4(overlayMaxLevel, 0, 0, 0)
         )
 
         let pass = MTLRenderPassDescriptor()
@@ -460,6 +590,7 @@ final class DepthRenderer {
         encoder.setRenderPipelineState(pipeline)
         encoder.setFragmentBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 0)
         encoder.setFragmentTexture(texture, index: 0)
+        encoder.setFragmentTexture(overlayTexture ?? texture, index: 1)
         encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
         encoder.endEncoding()
         commands.present(drawable)
