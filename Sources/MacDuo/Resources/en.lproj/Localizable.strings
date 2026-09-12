@@ -25,6 +25,15 @@
 "Lean back" = "Lean back";
 "Degrees of lean per degree of closing. 1 holds it still." = "Degrees of lean per degree of closing. 1 holds it still.";
 "0 keeps the sides parallel, 100 converges sharply." = "0 keeps the sides parallel, 100 converges sharply.";
+"Pictures" = "Pictures";
+"Off" = "Off";
+"Instead of screen" = "Instead of screen";
+"On top of blur" = "On top of blur";
+"One random picture is picked each time the effect starts. Pictures tilt, blur and dim with the screen." = "One random picture is picked each time the effect starts. Pictures tilt, blur and dim with the screen.";
+"No pictures yet. Add one to get started." = "No pictures yet. Add one to get started.";
+"Add…" = "Add…";
+"Choose pictures" = "Choose pictures";
+"Remove picture" = "Remove picture";
 "Show angle in menu bar" = "Show angle in menu bar";
 "Launch at login" = "Launch at login";
 "Reset" = "Reset";
