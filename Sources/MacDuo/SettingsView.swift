@@ -6,6 +6,17 @@ struct SettingsView: View {
     @ObservedObject var preferences: Preferences
     @ObservedObject var controller: LidController
 
+    /// Empty means following the system language.
+    @AppStorage("settingsLanguage") private var language = ""
+
+    private var selectedLanguage: SettingsLanguage {
+        SettingsLanguage(rawValue: language) ?? .preferred
+    }
+
+    private func localized(_ key: String) -> String {
+        selectedLanguage.localized(key)
+    }
+
     @State private var launchesAtLogin = SMAppService.mainApp.status == .enabled
     @State private var hasScreenPermission = CGPreflightScreenCaptureAccess()
     @State private var settingsOpenFailed = false
@@ -67,12 +78,12 @@ struct SettingsView: View {
             Text(String(format: "%.1f°", controller.currentAngle))
                 .font(.system(.title3, design: .rounded).monospacedDigit())
                 .foregroundStyle(.secondary)
-                .accessibilityLabel("Lid angle")
+                .accessibilityLabel(localized("Lid angle"))
         }
     }
 
     private var unavailableNotice: some View {
-        Text("This Mac has no lid angle sensor. Only some MacBook models have one.")
+        Text(localized("This Mac has no lid angle sensor. Only some MacBook models have one."))
             .font(.callout)
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
@@ -81,82 +92,101 @@ struct SettingsView: View {
     private var switches: some View {
         VStack(alignment: .leading, spacing: 4) {
             toggleRow(
-                "Depth effect",
+                localized("Depth effect"),
                 isOn: $preferences.isEnabled,
-                help: "Leans the screen away as the lid closes."
+                help: localized("Leans the screen away as the lid closes.")
             )
             toggleRow(
-                "Live rendering",
+                localized("Live rendering"),
                 isOn: $preferences.isLivePicture,
-                help: "Off holds the frame from when the effect started."
+                help: localized("Off holds the frame from when the effect started.")
             )
             .disabled(!preferences.isEnabled)
         }
     }
 
     private var startGroup: some View {
-        group("Start") {
-            slider(
-                "Start angle", value: $preferences.thresholdAngle, in: 5...130, format: "%.0f°",
-                help: "The effect starts at this angle."
+        group(localized("Start")) {
+            toggleRow(
+                localized("Timeout"),
+                isOn: $preferences.isTimeoutEnabled,
+                help: localized("Ends the effect once the angle stops changing.")
             )
             slider(
-                "Full effect after", value: $preferences.blurSpan, in: 5...60, format: "%.0f°",
-                help: "Degrees of further closing to reach full strength."
+                localized("Start angle"), value: $preferences.thresholdAngle, in: 5...130, format: "%.0f°",
+                help: localized("The effect starts at this angle.")
+            )
+            slider(
+                localized("Full effect after"), value: $preferences.blurSpan, in: 5...60, format: "%.0f°",
+                help: localized("Degrees of further closing to reach full strength.")
             )
         }
     }
 
     private var lookGroup: some View {
-        group("Look") {
+        group(localized("Look")) {
             slider(
-                "Blur", value: $preferences.maxBlurRadius, in: 10...160, format: "%.0f pt",
-                help: "Blur radius at the far edge."
+                localized("Blur"), value: $preferences.maxBlurRadius, in: 10...160, format: "%.0f pt",
+                help: localized("Blur radius at the far edge.")
             )
             slider(
-                "Blur spread", value: $preferences.blurEvenness, in: 0...1, format: "%.0f%%", scale: 100,
-                help: "0 blurs the far edge only, 100 the whole picture."
+                localized("Blur spread"), value: $preferences.blurEvenness, in: 0...1, format: "%.0f%%", scale: 100,
+                help: localized("0 blurs the far edge only, 100 the whole picture.")
             )
             slider(
-                "Dimming", value: $preferences.maxDim, in: 0...1, format: "%.0f%%", scale: 100,
-                help: "How dark the far edge goes."
+                localized("Dimming"), value: $preferences.maxDim, in: 0...1, format: "%.0f%%", scale: 100,
+                help: localized("How dark the far edge goes.")
             )
             slider(
-                "Dimming spread", value: $preferences.dimReach, in: 0.2...1, format: "%.0f%%", scale: 100,
-                help: "Everything above this height goes fully dark."
+                localized("Dimming spread"), value: $preferences.dimReach, in: 0.2...1, format: "%.0f%%", scale: 100,
+                help: localized("Everything above this height goes fully dark.")
             )
         }
     }
 
     private var perspectiveGroup: some View {
-        group("Perspective") {
+        group(localized("Perspective")) {
             slider(
-                "Lean back", value: $preferences.recession, in: 0...3, format: "%.1f×",
-                help: "Degrees of lean per degree of closing. 1 holds it still."
+                localized("Lean back"), value: $preferences.recession, in: 0...3, format: "%.1f×",
+                help: localized("Degrees of lean per degree of closing. 1 holds it still.")
             )
             slider(
-                "Perspective", value: perspective, in: 0...1, format: "%.0f%%", scale: 100,
-                help: "0 keeps the sides parallel, 100 converges sharply."
+                localized("Perspective"), value: perspective, in: 0...1, format: "%.0f%%", scale: 100,
+                help: localized("0 keeps the sides parallel, 100 converges sharply.")
             )
         }
     }
 
     private var appGroup: some View {
         VStack(alignment: .leading, spacing: 8) {
-            toggleRow("Show angle in menu bar", isOn: $preferences.showsAngleInMenuBar, help: nil)
-            toggleRow("Launch at login", isOn: $launchesAtLogin, help: nil)
+            HStack {
+                Text(localized("Language"))
+                Spacer()
+                Picker("", selection: $language) {
+                    Text(localized("System")).tag("")
+                    Text(verbatim: "English").tag(SettingsLanguage.english.rawValue)
+                    Text(localized("Chinese (Simplified)")).tag(SettingsLanguage.chinese.rawValue)
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .controlSize(.small)
+                .fixedSize()
+                .accessibilityLabel(localized("Language"))
+            }
+            toggleRow(localized("Show angle in menu bar"), isOn: $preferences.showsAngleInMenuBar, help: nil)
+            toggleRow(localized("Launch at login"), isOn: $launchesAtLogin, help: nil)
                 .onChange(of: launchesAtLogin) { _, newValue in
                     setLaunchAtLogin(newValue)
                 }
             HStack {
-                Button("Reset") { preferences.resetToDefaults() }
+                Button(localized("Reset")) { preferences.resetToDefaults() }
                 Spacer()
-                Button("Quit", action: onQuit)
+                Button(localized("Quit"), action: onQuit)
             }
             .controlSize(.small)
             .padding(.top, 2)
             HStack(spacing: 0) {
-                Text("Made by ").foregroundStyle(.secondary)
+                Text(localized("Made by ")).foregroundStyle(.secondary)
                 Link("Makito", destination: Self.authorURL)
                     .pointingHand()
                 Spacer()
@@ -201,20 +231,24 @@ struct SettingsView: View {
 
     private var permissionNotice: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Screen Recording permission is required to show the depth effect.")
+            Text(localized("Screen Recording permission is required to show the depth effect."))
                 .font(.callout)
                 .fixedSize(horizontal: false, vertical: true)
-            Button("Open System Settings") {
-                openScreenRecordingSettings()
+            HStack {
+                Spacer()
+                Button(localized("Open System Settings")) {
+                    openScreenRecordingSettings()
+                }
+                .controlSize(.small)
             }
-            .controlSize(.small)
             if settingsOpenFailed {
-                Text("Could not open System Settings. Open it manually and enable screen recording for Mac Duo under Privacy & Security.")
+                Text(localized("Could not open System Settings. Open it manually and enable screen recording for Mac Duo under Privacy & Security."))
                     .font(.caption)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
     }
 

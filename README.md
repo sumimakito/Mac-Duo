@@ -9,6 +9,8 @@ https://github.com/user-attachments/assets/3ea3b098-c6d2-4398-8f3a-e9087bbb33f2
 Close the lid and watch your screen content tilt, blur, and fade as it moves.  
 Mac Duo adds this effect to your MacBook, with controls in the menu bar.
 
+**Available in:** English and Simplified Chinese (简体中文).
+
 <img src="./assets/menu.png" width="400" alt="Mac Duo menu">
 
 </div>

@@ -3,6 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "MacDuo",
+    defaultLocalization: "en",
     platforms: [.macOS(.v14)],
     targets: [
         .target(
@@ -14,6 +15,7 @@ let package = Package(
             name: "MacDuo",
             dependencies: ["LidAngleKit"],
             path: "Sources/MacDuo",
+            resources: [.process("Resources")],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .executableTarget(

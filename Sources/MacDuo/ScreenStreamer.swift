@@ -3,8 +3,6 @@ import CoreVideo
 import Metal
 import ScreenCaptureKit
 
-/// A live picture of the built-in display, handed over as Metal textures.
-///
 /// Frames are `IOSurface` backed, so wrapping one as a texture copies nothing.
 /// `startCapture` takes long enough that the stream has to be started while
 /// the lid is still closing rather than at the trigger angle.
@@ -21,7 +19,7 @@ final class ScreenStreamer {
     private final class Receiver: NSObject, SCStreamOutput {
         private let cache: CVMetalTextureCache
         private let lock = NSLock()
-        private var newest: CVMetalTexture?
+        private var newest: CapturedFrame?
         private var newestID: UInt64 = 0
 
         init?(device: MTLDevice) {
@@ -33,11 +31,11 @@ final class ScreenStreamer {
         }
 
         /// The newest frame and its number, or `nil` before the first one.
-        func latest() -> (texture: MTLTexture, id: UInt64)? {
+        func latest() -> (frame: CapturedFrame, id: UInt64)? {
             lock.lock()
             defer { lock.unlock() }
-            guard let newest, let texture = CVMetalTextureGetTexture(newest) else { return nil }
-            return (texture, newestID)
+            guard let newest else { return nil }
+            return (newest, newestID)
         }
 
         func stream(
@@ -64,10 +62,11 @@ final class ScreenStreamer {
                 0,
                 &wrapped
             )
-            guard result == kCVReturnSuccess, let wrapped else { return }
+            guard result == kCVReturnSuccess, let wrapped,
+                  let frame = CapturedFrame(wrapped) else { return }
 
             lock.lock()
-            newest = wrapped
+            newest = frame
             newestID &+= 1
             lock.unlock()
         }
@@ -103,6 +102,7 @@ final class ScreenStreamer {
         isStarted = true
         startTask = Task { [weak self] in
             await self?.begin(displayID: displayID, on: target)
+            guard !Task.isCancelled else { return }
             self?.startTask = nil
         }
     }
@@ -137,16 +137,17 @@ final class ScreenStreamer {
 
     /// The newest frame, but only once. `nil` when nothing new has arrived
     /// since the last call.
-    func newFrame() -> MTLTexture? {
+    func newFrame() -> CapturedFrame? {
         let now = CACurrentMediaTime()
         guard now - lastHandOver >= Self.minimumHandOverInterval else { return nil }
         guard let latest = receiver?.latest(), latest.id != consumedID else { return nil }
         consumedID = latest.id
         lastHandOver = now
-        return latest.texture
+        return latest.frame
     }
 
     private func begin(displayID: CGDirectDisplayID, on target: NSScreen) async {
+        guard !Task.isCancelled else { return }
         guard let device, let receiver = Receiver(device: device) else {
             isStarted = false
             return
@@ -155,7 +156,7 @@ final class ScreenStreamer {
             if filter == nil || filterDisplayID != displayID {
                 await rebuildFilter(displayID: displayID)
             }
-            guard isStarted, let activeFilter = filter else { return }
+            guard !Task.isCancelled, isStarted, let activeFilter = filter else { return }
 
             let configuration = SCStreamConfiguration()
             configuration.width = Int(activeFilter.contentRect.width * CGFloat(activeFilter.pointPixelScale))
@@ -175,7 +176,7 @@ final class ScreenStreamer {
             )
             let started = CFAbsoluteTimeGetCurrent()
             try await fresh.startCapture()
-            guard isStarted else {
+            guard !Task.isCancelled, isStarted else {
                 try? await fresh.stopCapture()
                 return
             }
@@ -189,6 +190,7 @@ final class ScreenStreamer {
                 """
             )
         } catch {
+            guard !Task.isCancelled else { return }
             Diagnostics.geometry.error("stream failed: \(String(describing: error), privacy: .public)")
             invalidateFilter()
             isStarted = false
@@ -201,6 +203,7 @@ final class ScreenStreamer {
                 false,
                 onScreenWindowsOnly: true
             )
+            guard !Task.isCancelled else { return }
             guard let display = content.displays.first(where: { $0.displayID == displayID }) else {
                 invalidateFilter()
                 return
@@ -218,6 +221,7 @@ final class ScreenStreamer {
             )
             filterDisplayID = displayID
         } catch {
+            guard !Task.isCancelled else { return }
             Diagnostics.geometry.error("stream filter failed: \(String(describing: error), privacy: .public)")
             invalidateFilter()
         }
