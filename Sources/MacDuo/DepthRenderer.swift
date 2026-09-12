@@ -4,6 +4,48 @@ import MetalPerformanceShaders
 import QuartzCore
 import simd
 
+/// Maps framebuffer pixels directly into the padded picture texture.
+struct DepthTextureTransform {
+    let matrix: simd_double3x3
+    let heightOffset: Double
+    let heightScale: Double
+
+    init(
+        screenToPicture: simd_double3x3,
+        screenSize: CGSize,
+        pixelScale: CGFloat,
+        paddedOrigin: CGPoint,
+        paddedSize: CGSize
+    ) {
+        precondition(
+            screenSize.width > 0 && screenSize.height > 0
+                && pixelScale > 0 && paddedSize.width > 0 && paddedSize.height > 0
+        )
+
+        let scale = Double(pixelScale)
+        let screenHeight = Double(screenSize.height)
+        let pixelToScreen = simd_double3x3(columns: (
+            SIMD3(1 / scale, 0, 0),
+            SIMD3(0, -1 / scale, 0),
+            SIMD3(0, screenHeight, 1)
+        ))
+
+        let originX = Double(paddedOrigin.x)
+        let originY = Double(paddedOrigin.y)
+        let paddedWidth = Double(paddedSize.width)
+        let paddedHeight = Double(paddedSize.height)
+        let pictureToTexture = simd_double3x3(columns: (
+            SIMD3(1 / paddedWidth, 0, 0),
+            SIMD3(0, -1 / paddedHeight, 0),
+            SIMD3(-originX / paddedWidth, (originY + paddedHeight) / paddedHeight, 1)
+        ))
+
+        matrix = pictureToTexture * screenToPicture * pixelToScreen
+        heightOffset = (originY + paddedHeight) / screenHeight
+        heightScale = -paddedHeight / screenHeight
+    }
+}
+
 /// Draws the picture with Metal.
 ///
 /// The picture sits on a black margin in one texture, with a Gaussian pyramid
@@ -11,17 +53,16 @@ import simd
 @MainActor
 final class DepthRenderer {
 
-    /// Black margin around the picture, in points. Stays above the largest
-    /// blur radius, so the blur reaches real black on every side.
+    /// Black margin around the picture, in points, so the pyramid can blur the
+    /// picture edge into black.
     nonisolated private static let paddingInPoints: CGFloat = 120
 
     private struct Uniforms {
         var column0: SIMD4<Float>
         var column1: SIMD4<Float>
         var column2: SIMD4<Float>
-        var screenAndOrigin: SIMD4<Float>
-        var paddedAndBlur: SIMD4<Float>
-        var shape: SIMD4<Float>
+        var blur: SIMD4<Float>
+        var height: SIMD4<Float>
         var light: SIMD4<Float>
     }
 
@@ -64,7 +105,7 @@ final class DepthRenderer {
     /// frame that arrives first wins, since it is the newer of the two.
     private var pendingSeed: (buffer: MTLBuffer, width: Int, height: Int)?
     private static var hasReportedPyramidFailure = false
-    /// Built once, re-encoded every frame.
+    /// Built once, re-encoded for each new live frame.
     private lazy var livePyramid = MPSImageGaussianPyramid(device: device, centerWeight: 0.375)
 
     var isReady: Bool { texture != nil }
@@ -166,7 +207,7 @@ final class DepthRenderer {
             height: height,
             mipmapped: true
         )
-        descriptor.usage = [.shaderRead, .shaderWrite]
+        descriptor.usage = [.shaderRead, .shaderWrite, .pixelFormatView]
         descriptor.storageMode = .private
         guard var texture = device.makeTexture(descriptor: descriptor),
               let commands = queue.makeCommandBuffer(),
@@ -234,7 +275,7 @@ final class DepthRenderer {
             )
             // `renderTarget` is only there for the one clear that blacks the
             // margin.
-            descriptor.usage = [.shaderRead, .shaderWrite, .renderTarget]
+            descriptor.usage = [.shaderRead, .shaderWrite, .renderTarget, .pixelFormatView]
             descriptor.storageMode = .private
             guard let fresh = device.makeTexture(descriptor: descriptor) else { return false }
             clearToBlack(fresh)
@@ -414,8 +455,7 @@ final class DepthRenderer {
     ) {
         guard let commands = queue.makeCommandBuffer() else { return }
         absorbPending(into: commands)
-        guard let texture, screenSize.width > 0, screenSize.height > 0,
-              let drawable = layer.nextDrawable() else {
+        guard let texture, screenSize.width > 0, screenSize.height > 0 else {
             commands.commit()
             return
         }
@@ -425,27 +465,49 @@ final class DepthRenderer {
             height: Double(screenSize.height),
             to: corners.map { SIMD2(Double($0.x), Double($0.y)) }
         )
-        let inverse = forward.inverse
+        let transform = DepthTextureTransform(
+            screenToPicture: forward.inverse,
+            screenSize: screenSize,
+            pixelScale: pixelScale,
+            paddedOrigin: paddedOrigin,
+            paddedSize: paddedSize
+        )
 
         func column(_ index: Int) -> SIMD4<Float> {
-            let c = inverse[index]
+            let c = transform.matrix[index]
             return SIMD4(Float(c.x), Float(c.y), Float(c.z), 0)
         }
+        // The response is uniform, so calculate it once instead of per pixel.
+        let radiusScale = powf(max(Float(blurStrength), 0), 1.2)
+            * Float(maxBlurRadius * Double(pixelScale))
+        let hingeRadius = radiusScale * Float(hingeFloor)
         var uniforms = Uniforms(
             column0: column(0),
             column1: column(1),
             column2: column(2),
-            screenAndOrigin: SIMD4(
-                Float(screenSize.width), Float(screenSize.height),
-                Float(paddedOrigin.x), Float(paddedOrigin.y)
+            blur: SIMD4(
+                hingeRadius,
+                radiusScale * (1 - Float(hingeFloor)),
+                maxLevel,
+                0
             ),
-            paddedAndBlur: SIMD4(
-                Float(paddedSize.width), Float(paddedSize.height),
-                Float(maxBlurRadius * Double(pixelScale)), Float(blurStrength)
+            height: SIMD4(
+                Float(transform.heightOffset),
+                Float(transform.heightScale),
+                0,
+                0
             ),
-            shape: SIMD4(Float(hingeFloor), Float(maxDim), Float(pixelScale), maxLevel),
-            light: SIMD4(Float(dimHingeFloor), Float(dimStrength), Float(dimReach), 0)
+            light: SIMD4(
+                Float(maxDim),
+                Float(dimHingeFloor),
+                Float(dimStrength),
+                Float(dimReach)
+            )
         )
+        guard let drawable = layer.nextDrawable() else {
+            commands.commit()
+            return
+        }
 
         let pass = MTLRenderPassDescriptor()
         pass.colorAttachments[0].texture = drawable.texture
