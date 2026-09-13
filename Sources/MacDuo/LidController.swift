@@ -635,7 +635,8 @@ final class LidController: ObservableObject {
             on: screen,
             startAngle: preferences.thresholdAngle,
             tuning: tuning,
-            fadeIn: Self.fadeInDuration
+            fadeIn: Self.fadeInDuration,
+            isImportedImage: usesImportedImage
         )
         // The link belongs to the overlay window.
         startDisplayLink()

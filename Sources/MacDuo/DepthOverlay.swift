@@ -194,7 +194,8 @@ final class DepthOverlay {
         on screen: NSScreen,
         startAngle: Double,
         tuning: DepthTuning,
-        fadeIn: TimeInterval
+        fadeIn: TimeInterval,
+        isImportedImage: Bool = false
     ) {
         dismiss(animated: false)
         // The screenshot's screen can be stale once the lid shuts into
@@ -210,7 +211,7 @@ final class DepthOverlay {
             ? Double(image.width) / Double(screen.frame.width)
             : Double(screen.backingScaleFactor)
 
-        makeWindow(on: screen, pixelScale: pixelScale)
+        makeWindow(on: screen, pixelScale: pixelScale, isImportedImage: isImportedImage)
         guard let window else { return }
 
         buildToken += 1
@@ -231,7 +232,13 @@ final class DepthOverlay {
         }
     }
 
-    private func makeWindow(on screen: NSScreen, pixelScale: Double) {
+    static func overlayLevel(isImportedImage: Bool) -> NSWindow.Level {
+        NSWindow.Level(rawValue: isImportedImage
+            ? Int(CGWindowLevelForKey(.statusWindow)) + 1
+            : Int(CGShieldingWindowLevel()))
+    }
+
+    private func makeWindow(on screen: NSScreen, pixelScale: Double, isImportedImage: Bool = false) {
         guard let renderer else { return }
         let view = MetalHostView(layer: renderer.makeLayer(), scale: CGFloat(pixelScale))
         view.frame = NSRect(origin: .zero, size: screenSize)
@@ -249,7 +256,8 @@ final class DepthOverlay {
         window.hasShadow = false
         window.ignoresMouseEvents = true
         window.isReleasedWhenClosed = false
-        window.level = NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()))
+        // Imported artwork should not use the screen-shielding level reserved for desktop effects.
+        window.level = Self.overlayLevel(isImportedImage: isImportedImage)
         window.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
         window.setFrame(screen.frame, display: false)
         window.alphaValue = 0
