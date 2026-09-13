@@ -30,9 +30,15 @@ final class LidController: ObservableObject {
     private var importedPicture: CGImage?
     private var imagePlacement = ImagePlacement()
     private var imageEditor: ImageCropEditor?
+    private let imageStore = ImportedImageStore()
 
     func selectImportedImage(_ selected: Bool) {
         guard !selected || importedOriginal != nil else { return }
+        if let original = importedOriginal {
+            do {
+                try imageStore.save(image: original, name: importedImageName ?? "", placement: imagePlacement, selected: selected)
+            } catch { showImageSaveError(); return }
+        }
         disableEffect()
         usesImportedImage = selected
     }
@@ -73,12 +79,22 @@ final class LidController: ObservableObject {
         imageEditor = editor
         editor.completion = { [weak self] image, placement in
             guard let self else { return }
+            do {
+                try self.imageStore.save(image: original, name: name, placement: placement, selected: true)
+            } catch { self.showImageSaveError(); return }
             self.importedOriginal = original; self.importedPicture = image
             self.imagePlacement = placement; self.importedImageName = name
             self.usesImportedImage = true
         }
         editor.onClose = { [weak self] in self?.isEditingImage = false }
         editor.panel.center(); editor.panel.makeKeyAndOrderFront(nil); NSApp.activate()
+    }
+
+    private func showImageSaveError() {
+        let language = SettingsLanguage(rawValue: UserDefaults.standard.string(forKey: "settingsLanguage") ?? "") ?? .preferred
+        let alert = NSAlert()
+        alert.messageText = language.localized("Could not save the image locally. Your previous image is unchanged.")
+        alert.runModal()
     }
 
     let snapshotter = ScreenSnapshotter()
@@ -185,6 +201,17 @@ final class LidController: ObservableObject {
 
     init(preferences: Preferences) {
         self.preferences = preferences
+        do {
+            if let saved = try imageStore.load() {
+                importedOriginal = saved.image
+                importedImageName = saved.record.name
+                imagePlacement = saved.record.placement
+                usesImportedImage = saved.record.selected
+            }
+        } catch {
+            // Keep an unreadable file for recovery and safely fall back to Desktop.
+            Diagnostics.lid.error("Could not restore the locally saved imported image")
+        }
         enabledSubscription = preferences.$isEnabled
             .removeDuplicates()
             .sink { [weak self] enabled in

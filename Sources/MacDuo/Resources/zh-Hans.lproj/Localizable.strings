@@ -49,7 +49,6 @@
 
 "Crop / resize…" = "裁剪 / 缩放…";
 
-"Images keep their proportions. Image and crop settings last for this session." = "图片保持原始比例。图片和裁剪设置仅在本次运行期间保留。";
 
 "Could not open this image." = "无法打开此图片。";
 
@@ -70,3 +69,7 @@
 "Fill / crop" = "填满 / 裁剪";
 
 "Fit whole image" = "完整显示";
+
+"Your image, crop settings, and picture source are saved locally and restored on launch." = "图片、裁剪设置和画面来源会保存在本机，并在启动时恢复。";
+
+"Could not save the image locally. Your previous image is unchanged." = "无法在本机保存图片。此前的图片保持不变。";

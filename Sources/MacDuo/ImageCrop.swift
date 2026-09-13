@@ -1,6 +1,6 @@
 import AppKit
 
-struct ImagePlacement {
+struct ImagePlacement: Codable {
     var fill = true
     var zoom: CGFloat = 1
     var x: CGFloat = 0

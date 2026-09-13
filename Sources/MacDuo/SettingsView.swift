@@ -127,7 +127,7 @@ struct SettingsView: View {
                 }
             }
             .controlSize(.small)
-            Text(localized("Images keep their proportions. Image and crop settings last for this session."))
+            Text(localized("Your image, crop settings, and picture source are saved locally and restored on launch."))
                 .font(.caption2).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }

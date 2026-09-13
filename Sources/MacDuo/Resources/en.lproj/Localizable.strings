@@ -49,7 +49,6 @@
 
 "Crop / resize…" = "Crop / resize…";
 
-"Images keep their proportions. Image and crop settings last for this session." = "Images keep their proportions. Image and crop settings last for this session.";
 
 "Could not open this image." = "Could not open this image.";
 
@@ -70,3 +69,7 @@
 "Fill / crop" = "Fill / crop";
 
 "Fit whole image" = "Fit whole image";
+
+"Your image, crop settings, and picture source are saved locally and restored on launch." = "Your image, crop settings, and picture source are saved locally and restored on launch.";
+
+"Could not save the image locally. Your previous image is unchanged." = "Could not save the image locally. Your previous image is unchanged.";
