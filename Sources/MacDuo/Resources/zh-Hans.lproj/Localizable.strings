@@ -36,3 +36,37 @@
 "Language" = "语言";
 "System" = "跟随系统";
 "Chinese (Simplified)" = "简体中文";
+
+"Picture" = "画面";
+
+"Picture source" = "画面来源";
+
+"Desktop" = "桌面";
+
+"Imported image" = "导入的图片";
+
+"Import image…" = "导入图片…";
+
+"Crop / resize…" = "裁剪 / 缩放…";
+
+"Images keep their proportions. Image and crop settings last for this session." = "图片保持原始比例。图片和裁剪设置仅在本次运行期间保留。";
+
+"Could not open this image." = "无法打开此图片。";
+
+"Crop and resize image" = "裁剪与缩放图片";
+
+"Size" = "大小";
+
+"Left / right" = "左右位置";
+
+"Down / up" = "上下位置";
+
+"Proportions stay unchanged. Fit adds black borders where needed." = "始终保持原始比例；完整显示时，空余区域填充黑色。";
+
+"Cancel" = "取消";
+
+"Use image" = "使用图片";
+
+"Fill / crop" = "填满 / 裁剪";
+
+"Fit whole image" = "完整显示";

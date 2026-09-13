@@ -2,6 +2,7 @@ import AppKit
 import Combine
 import LidAngleKit
 import QuartzCore
+import UniformTypeIdentifiers
 
 /// Watches the lid angle and drives the depth effect overlay.
 ///
@@ -21,6 +22,64 @@ final class LidController: ObservableObject {
     @Published private(set) var currentAngle: Double = 0
     @Published private(set) var isSensorAvailable = false
     @Published private(set) var isActive = false
+
+    @Published private(set) var usesImportedImage = false
+    @Published private(set) var importedImageName: String?
+    @Published private(set) var isEditingImage = false
+    private var importedOriginal: CGImage?
+    private var importedPicture: CGImage?
+    private var imagePlacement = ImagePlacement()
+    private var imageEditor: ImageCropEditor?
+
+    func selectImportedImage(_ selected: Bool) {
+        guard !selected || importedOriginal != nil else { return }
+        disableEffect()
+        usesImportedImage = selected
+    }
+
+    func importImage() {
+        guard !isEditingImage else { return }
+        disableEffect(); isEditingImage = true
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.png, .jpeg, .heic, .tiff]
+        panel.canChooseDirectories = false; panel.allowsMultipleSelection = false
+        NSApp.activate()
+        panel.begin { [weak self] response in
+            guard let self else { return }
+            guard response == .OK, let url = panel.url else { self.isEditingImage = false; return }
+            guard let image = NSImage(contentsOf: url),
+                  let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+                self.isEditingImage = false
+                let alert = NSAlert()
+                let language = SettingsLanguage(rawValue: UserDefaults.standard.string(forKey: "settingsLanguage") ?? "") ?? .preferred
+                alert.messageText = language.localized("Could not open this image.")
+                alert.runModal(); return
+            }
+            self.editImage(cg, name: url.lastPathComponent, placement: ImagePlacement())
+        }
+    }
+
+    func adjustImage() {
+        guard !isEditingImage, let original = importedOriginal else { return }
+        disableEffect(); isEditingImage = true
+        editImage(original, name: importedImageName ?? "", placement: imagePlacement)
+    }
+
+    private func editImage(_ original: CGImage, name: String, placement: ImagePlacement) {
+        guard let screen = NSScreen.builtIn else { isEditingImage = false; return }
+        let size = CGSize(width: screen.frame.width * screen.backingScaleFactor,
+                          height: screen.frame.height * screen.backingScaleFactor)
+        let editor = ImageCropEditor(image: original, size: size, placement: placement)
+        imageEditor = editor
+        editor.completion = { [weak self] image, placement in
+            guard let self else { return }
+            self.importedOriginal = original; self.importedPicture = image
+            self.imagePlacement = placement; self.importedImageName = name
+            self.usesImportedImage = true
+        }
+        editor.onClose = { [weak self] in self?.isEditingImage = false }
+        editor.panel.center(); editor.panel.makeKeyAndOrderFront(nil); NSApp.activate()
+    }
 
     let snapshotter = ScreenSnapshotter()
 
@@ -198,7 +257,7 @@ final class LidController: ObservableObject {
 
     /// Plays the effect once on the current screen contents.
     func runPreview() {
-        guard preferences.isEnabled, !isSuspended, preview == nil, !isActive else { return }
+        guard preferences.isEnabled, !isEditingImage, !isSuspended, preview == nil, !isActive else { return }
         // Well above the trigger angle, so the sweep runs the pre-warm the way
         // a real close does.
         preview = PreviewRun(
@@ -319,7 +378,7 @@ final class LidController: ObservableObject {
     /// Brings the screen in line with `wantsEffect` on every sample. A run
     /// whose screenshot failed is retried here.
     private func reconcile(angle: Double) {
-        guard preferences.isEnabled, !isSuspended else { return }
+        guard preferences.isEnabled, !isEditingImage, !isSuspended else { return }
         let wanted = wantsEffect(angle: angle)
         if wanted != isActive {
             Diagnostics.lid.notice(
@@ -373,6 +432,7 @@ final class LidController: ObservableObject {
     /// Runs only while the lid is closing, so holding it still does not leave
     /// a capture loop running.
     private func updatePrewarm(angle: Double, ceiling: Double) {
+        guard !usesImportedImage else { return }
         let closingRecently = CACurrentMediaTime() - lastClosingTime < preferences.prewarmLinger
         guard angle <= ceiling, closingRecently else {
             snapshotter.endPrewarm()
@@ -456,7 +516,17 @@ final class LidController: ObservableObject {
     /// Shows the held screenshot, or waits for one. A pre-warm capture that is
     /// already running counts as that wait.
     private func presentPicture() {
-        guard preferences.isEnabled, !isSuspended, isActive else { return }
+        guard preferences.isEnabled, !isEditingImage, !isSuspended, isActive else { return }
+        if usesImportedImage {
+            guard let screen = NSScreen.builtIn, let original = importedOriginal else { return }
+            let size = CGSize(width: screen.frame.width * screen.backingScaleFactor,
+                              height: screen.frame.height * screen.backingScaleFactor)
+            if importedPicture?.width != Int(size.width) || importedPicture?.height != Int(size.height) {
+                importedPicture = imagePlacement.render(original, size: size)
+            }
+            if let image = importedPicture { show(image: image, on: screen) }
+            return
+        }
         if preferences.isLivePicture, let screen = NSScreen.builtIn,
            overlay.showLive(
                on: screen,
@@ -574,7 +644,7 @@ final class LidController: ObservableObject {
         let rawInterval = now - lastFrameTime
         let dt = min(max(rawInterval, 1.0 / 240), 1.0 / 20)
         lastFrameTime = now
-        if let frame = streamer.newFrame() {
+        if !usesImportedImage, let frame = streamer.newFrame() {
             overlay.absorb(frame)
         }
         let target = isClosingOut ? preferences.thresholdAngle : rawAngle

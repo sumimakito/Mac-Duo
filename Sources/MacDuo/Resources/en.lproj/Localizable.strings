@@ -36,3 +36,37 @@
 "Language" = "Language";
 "System" = "System";
 "Chinese (Simplified)" = "Chinese (Simplified)";
+
+"Picture" = "Picture";
+
+"Picture source" = "Picture source";
+
+"Desktop" = "Desktop";
+
+"Imported image" = "Imported image";
+
+"Import image…" = "Import image…";
+
+"Crop / resize…" = "Crop / resize…";
+
+"Images keep their proportions. Image and crop settings last for this session." = "Images keep their proportions. Image and crop settings last for this session.";
+
+"Could not open this image." = "Could not open this image.";
+
+"Crop and resize image" = "Crop and resize image";
+
+"Size" = "Size";
+
+"Left / right" = "Left / right";
+
+"Down / up" = "Down / up";
+
+"Proportions stay unchanged. Fit adds black borders where needed." = "Proportions stay unchanged. Fit adds black borders where needed.";
+
+"Cancel" = "Cancel";
+
+"Use image" = "Use image";
+
+"Fill / crop" = "Fill / crop";
+
+"Fit whole image" = "Fit whole image";
