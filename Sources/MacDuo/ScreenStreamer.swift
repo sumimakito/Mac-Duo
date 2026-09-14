@@ -80,6 +80,8 @@ final class ScreenStreamer {
     /// kept between runs and rebuilt only when the display changes.
     private var filter: SCContentFilter?
     private var filterDisplayID: CGDirectDisplayID?
+    var hasFilter: Bool { filter != nil }
+    var currentFilter: SCContentFilter? { filter }
     private var consumedID: UInt64 = 0
     private var lastHandOver: CFTimeInterval = 0
 
@@ -156,7 +158,10 @@ final class ScreenStreamer {
             if filter == nil || filterDisplayID != displayID {
                 await rebuildFilter(displayID: displayID)
             }
-            guard !Task.isCancelled, isStarted, let activeFilter = filter else { return }
+            guard !Task.isCancelled, isStarted, let activeFilter = filter else {
+                isStarted = false
+                return
+            }
 
             let configuration = SCStreamConfiguration()
             configuration.width = Int(activeFilter.contentRect.width * CGFloat(activeFilter.pointPixelScale))
@@ -209,10 +214,12 @@ final class ScreenStreamer {
                 return
             }
             // Exclude ourselves, or the overlay feeds back into its own picture.
-            let bundleID = Bundle.main.bundleIdentifier
-            let ownApplications = content.applications.filter { $0.bundleIdentifier == bundleID }
-            if ownApplications.isEmpty {
-                Diagnostics.geometry.error("stream cannot exclude this app: it owns no window yet")
+            let myPID = ProcessInfo.processInfo.processIdentifier
+            let ownApplications = content.applications.filter { $0.processID == myPID }
+            guard !ownApplications.isEmpty else {
+                Diagnostics.geometry.error("Cannot construct SCContentFilter: self process (PID \(myPID)) not found in shareable content")
+                invalidateFilter()
+                return // FAIL-CLOSED: do NOT capture without self-exclusion
             }
             filter = SCContentFilter(
                 display: display,

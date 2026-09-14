@@ -19,10 +19,21 @@ enum SettingsLanguage: String {
     }
 
     private var bundle: Bundle {
-        guard let path = Self.resources.path(forResource: rawValue.lowercased(), ofType: "lproj"),
-              let bundle = Bundle(path: path) else { return Self.resources }
-        return bundle
+        if let path = Self.resources.path(forResource: rawValue, ofType: "lproj"),
+           let bundle = Bundle(path: path) {
+            return bundle
+        }
+        if let path = Self.resources.path(forResource: rawValue.lowercased(), ofType: "lproj"),
+           let bundle = Bundle(path: path) {
+            return bundle
+        }
+        return Self.resources
     }
+
+    var resolvedBundle: Bundle {
+        bundle
+    }
+
 
     func localized(_ key: String) -> String {
         bundle.localizedString(forKey: key, value: key, table: nil)

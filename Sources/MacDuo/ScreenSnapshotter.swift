@@ -29,6 +29,8 @@ final class ScreenSnapshotter {
 
     private var filter: SCContentFilter?
     private var filterDisplayID: CGDirectDisplayID?
+    var hasFilter: Bool { filter != nil }
+    var currentFilter: SCContentFilter? { filter }
     private var timer: Timer?
     private var inFlight: Task<Void, Never>?
     private var lastLoggedGeometry: String?
@@ -154,11 +156,18 @@ final class ScreenSnapshotter {
             )
             guard let display = content.displays.first(where: { $0.displayID == displayID }) else {
                 filter = nil
+                filterDisplayID = nil
                 return
             }
             // Exclude ourselves, or a lingering overlay lands in the next snapshot.
-            let bundleID = Bundle.main.bundleIdentifier
-            let ownApplications = content.applications.filter { $0.bundleIdentifier == bundleID }
+            let myPID = ProcessInfo.processInfo.processIdentifier
+            let ownApplications = content.applications.filter { $0.processID == myPID }
+            guard !ownApplications.isEmpty else {
+                Diagnostics.geometry.error("Cannot construct SCContentFilter: self process (PID \(myPID)) not found in shareable content")
+                filter = nil
+                filterDisplayID = nil
+                return // FAIL-CLOSED: do NOT capture without self-exclusion
+            }
             filter = SCContentFilter(
                 display: display,
                 excludingApplications: ownApplications,
