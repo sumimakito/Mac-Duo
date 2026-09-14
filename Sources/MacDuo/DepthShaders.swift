@@ -21,6 +21,7 @@ enum DepthShaders {
         float4 paddedAndBlur;    // padded size, max radius in pixels, blur strength
         float4 shape;            // blur floor, max dim, pixel scale, max level
         float4 light;            // dim floor, dim strength, dim reach, unused
+        float4 blurColor;        // linear r, g, b, alpha
     };
 
     vertex float4 depthVertex(uint vertexID [[vertex_id]]) {
@@ -45,6 +46,7 @@ enum DepthShaders {
         float dimFloor = uniforms.light.x;
         float dimStrength = uniforms.light.y;
         float dimReach = uniforms.light.z;
+        float3 blurColor = uniforms.blurColor.rgb;
 
         // Fragment coordinates are pixels with y down; the geometry is points
         // with y up.
@@ -55,12 +57,12 @@ enum DepthShaders {
                                             uniforms.column1.xyz,
                                             uniforms.column2.xyz);
         float3 mapped = screenToPicture * float3(screenPoint, 1.0);
-        if (abs(mapped.z) < 1e-6) { return float4(0.0, 0.0, 0.0, 1.0); }
+        if (abs(mapped.z) < 1e-6) { return float4(blurColor, 1.0); }
         float2 picturePoint = mapped.xy / mapped.z;
 
         float2 unit = (picturePoint - paddedOrigin) / paddedSize;
         if (unit.x < 0.0 || unit.x > 1.0 || unit.y < 0.0 || unit.y > 1.0) {
-            return float4(0.0, 0.0, 0.0, 1.0);
+            return float4(blurColor, 1.0);
         }
         float2 texCoord = float2(unit.x, 1.0 - unit.y);
 
@@ -74,9 +76,11 @@ enum DepthShaders {
         // dimming reaches full strength leaves no visible edge.
         float spread = smoothstep(0.0, max(dimReach, 0.02), height);
         float fade = dimStrength * (dimFloor + (1.0 - dimFloor) * spread);
+        float dimFactor = clamp(maxDim * fade, 0.0, 1.0);
         // The sample is linear light. Raising the factor to 2.2 keeps the
         // dimming setting a fraction of the encoded brightness.
-        colour.rgb *= pow(1.0 - maxDim * fade, 2.2);
+        float t = 1.0 - pow(1.0 - dimFactor, 2.2);
+        colour.rgb = mix(colour.rgb, blurColor, t);
         return float4(colour.rgb, 1.0);
     }
     """
