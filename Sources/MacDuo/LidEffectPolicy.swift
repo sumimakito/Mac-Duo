@@ -55,7 +55,7 @@ struct LidEffectPolicy {
 
     /// A lid held at or above this angle has been opened again, even when
     /// threshold + hysteresis is past what the hinge can reach.
-    var dwellAngle: Double { threshold + min(hysteresis, 1) }
+    var dwellAngle: Double { threshold }
 
     func wantsEffect(
         isEnabled: Bool,

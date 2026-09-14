@@ -29,7 +29,7 @@ final class Preferences: ObservableObject {
 
     private static let factory: [String: Any] = [
         Key.isEnabled: true,
-        Key.isTimeoutEnabled: false,
+        Key.isTimeoutEnabled: true,
         Key.thresholdAngle: 90.0,
         Key.blurSpan: 60.0,
         Key.maxBlurRadius: 135.0,

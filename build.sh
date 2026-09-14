@@ -12,6 +12,12 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+if [ -z "${SDKROOT:-}" ]; then
+  if [ -d "/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk" ]; then
+    export SDKROOT="/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk"
+  fi
+fi
+
 SIGN_IDENTITY="${SIGN_IDENTITY:--}"
 APP_NAME="Mac Duo"
 BUNDLE="build/${APP_NAME}.app"
@@ -57,8 +63,24 @@ echo "built ${BUNDLE}"
 codesign -dv "$BUNDLE" 2>&1 | grep -E "Identifier|TeamIdentifier|Signature" || true
 
 if "$RUN_APP"; then
-  pkill -x MacDuo 2>/dev/null || true
-  sleep 0.5
+  BUNDLE_REALPATH="$(cd "$BUNDLE" 2>/dev/null && pwd -P || echo "$PWD/$BUNDLE")"
+  TARGET_BIN="$BUNDLE_REALPATH/Contents/MacOS/MacDuo"
+
+  # Terminate only processes executing from the local workspace build bundle
+  for pid in $(pgrep -x MacDuo 2>/dev/null || true); do
+    proc_cmd="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+    if [[ "$proc_cmd" == *"$TARGET_BIN"* ]] || [[ "$proc_cmd" == *"$BUNDLE_REALPATH"* ]] || [[ "$proc_cmd" == *"$PWD/build/"* ]] || [[ "$proc_cmd" == *"$PWD/.build/"* ]]; then
+      echo "Stopping previous development instance (PID $pid)..."
+      kill -TERM "$pid" 2>/dev/null || true
+      for _ in {1..10}; do
+        if ! kill -0 "$pid" 2>/dev/null; then break; fi
+        sleep 0.1
+      done
+      kill -KILL "$pid" 2>/dev/null || true
+    fi
+  done
+
+  sleep 0.2
   open "$BUNDLE"
   echo "launched"
 fi
