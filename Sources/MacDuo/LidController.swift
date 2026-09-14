@@ -29,6 +29,49 @@ final class LidController: ObservableObject {
     private let overlay = DepthOverlay()
     private let streamer = ScreenStreamer()
 
+    /// The highest lid angle observed from the hardware sensor.
+    /// Used to clamp the effective threshold angle so hysteresis is physically reachable.
+    var observedMaxAngle: Double = 135.0
+
+    /// Effective threshold angle, clamped dynamically such that
+    /// effectiveThresholdAngle + hysteresis <= observedMaxAngle.
+    /// Clamped to valid physical range [0°, 180°].
+    var effectiveThresholdAngle: Double {
+        let physicalMax = min(max(observedMaxAngle, 0.0), 180.0)
+        let reachableMax = max(physicalMax - preferences.hysteresis, 0.0)
+        let requested = min(max(preferences.thresholdAngle, 0.0), 180.0)
+        return min(requested, reachableMax)
+    }
+
+    /// Whether the timeout release latch is currently active.
+    /// When active, re-triggering is blocked until the lid reopens at or above the threshold.
+    var isTimeoutAwaitingRelease: Bool {
+        get { timeoutAwaitingRelease }
+        set { timeoutAwaitingRelease = newValue }
+    }
+
+    /// Evaluates whether a lid angle reading cancels an active timeout release latch.
+    /// When the lid reopens at or above the effective threshold angle, the latch cancels.
+    @discardableResult
+    func evaluateTimeoutCancellation(angle: Double) -> Bool {
+        if timeoutAwaitingRelease {
+            if angle >= effectiveThresholdAngle {
+                timeoutAwaitingRelease = false
+                return true
+            }
+        }
+        return false
+    }
+
+    private lazy var escapeHatch = EscapeHatch { [weak self] in
+        self?.emergencyDismiss()
+    }
+
+    #if DEBUG
+    private var previewObserver: (any NSObjectProtocol)?
+    var isPreviewObserverRegistered: Bool { previewObserver != nil }
+    #endif
+
     private var enabledSubscription: AnyCancellable?
     private var pictureTask: Task<Void, Never>?
     private var pollTimer: Timer?
@@ -134,8 +177,9 @@ final class LidController: ObservableObject {
         }
     }
 
-    init(preferences: Preferences) {
+    init(preferences: Preferences, observedMaxAngle: Double = 135.0) {
         self.preferences = preferences
+        self.observedMaxAngle = observedMaxAngle
         enabledSubscription = preferences.$isEnabled
             .removeDuplicates()
             .sink { [weak self] enabled in
@@ -154,18 +198,25 @@ final class LidController: ObservableObject {
             rawAngle = angle
             currentAngle = angle
             visualAngle.reset(to: angle)
+            observedMaxAngle = max(observedMaxAngle, angle)
         }
         // Before the first poll, which reads it.
         builtInLayout = Layout(displayID: NSScreen.builtIn?.displayID, frame: NSScreen.builtIn?.frame)
         setPollInterval(Self.idlePollInterval)
         observeSystemEvents()
-        DistributedNotificationCenter.default().addObserver(
+        #if DEBUG
+        if let existing = previewObserver {
+            DistributedNotificationCenter.default().removeObserver(existing)
+            previewObserver = nil
+        }
+        previewObserver = DistributedNotificationCenter.default().addObserver(
             forName: Notification.Name("to.maki.MacDuo.preview"),
             object: nil,
             queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.runPreview() }
         }
+        #endif
         overlay.warmUp()
         Task {
             await snapshotter.warmFilter()
@@ -180,7 +231,24 @@ final class LidController: ObservableObject {
         pollTimer?.invalidate()
         pollTimer = nil
         pollInterval = 0
+        #if DEBUG
+        if let observer = previewObserver {
+            DistributedNotificationCenter.default().removeObserver(observer)
+            previewObserver = nil
+        }
+        #endif
         stopEffectAndCapture()
+    }
+
+    /// Immediate dismissal invoked by the emergency Escape hotkey or manual rescue.
+    func emergencyDismiss() {
+        Diagnostics.lid.notice("emergency escape: dismissing overlay immediately and latching release")
+        stopEffectAndCapture()
+        timeoutAwaitingRelease = true
+        motionIntent.reset()
+        lastClosingTime = -.greatestFiniteMagnitude
+        escapeHatch.disable()
+        setPollInterval(Self.idlePollInterval)
     }
 
     private func stopEffectAndCapture() {
@@ -190,6 +258,7 @@ final class LidController: ObservableObject {
         isClosingOut = false
         stopDisplayLink()
         overlay.dismiss(animated: false)
+        escapeHatch.disable()
         snapshotter.stop()
         streamer.stop()
         overlay.discardLive()
@@ -216,10 +285,10 @@ final class LidController: ObservableObject {
         preview = PreviewRun(
             startedAt: CACurrentMediaTime(),
             open: max(
-                preferences.thresholdAngle + preferences.hysteresis + 5,
-                min(preferences.thresholdAngle + 35, 130)
+                effectiveThresholdAngle + preferences.hysteresis + 5,
+                min(effectiveThresholdAngle + 35, 130)
             ),
-            shut: max(preferences.thresholdAngle - preferences.blurSpan * 1.15, 5)
+            shut: max(effectiveThresholdAngle - preferences.blurSpan * 1.15, 5)
         )
         setPollInterval(Self.activePollInterval)
     }
@@ -274,6 +343,7 @@ final class LidController: ObservableObject {
 
         rawAngle = angle
         peakAngle = max(peakAngle, angle)
+        observedMaxAngle = max(observedMaxAngle, angle)
         publish(angle: angle)
 
         if preferences.isEnabled {
@@ -282,14 +352,18 @@ final class LidController: ObservableObject {
             reconcile(angle: angle)
         }
 
-        let prewarmZone = preferences.thresholdAngle + preferences.prewarmCeiling
+        let now = CACurrentMediaTime()
+        let wasClosing = motionIntent.wasClosingRecently(at: now, memoryDuration: Self.closingMemory)
+            || (now - lastClosingTime < preferences.prewarmLinger)
+        let prewarmZone = effectiveThresholdAngle + preferences.prewarmCeiling
+        let isApproachingThreshold = wasClosing && angle <= prewarmZone
         let wantsFastPolling = preferences.isEnabled
-            && (preview != nil || isActive || angle <= prewarmZone + Self.fastPollMargin)
+            && (preview != nil || isActive || isApproachingThreshold)
         setPollInterval(wantsFastPolling ? Self.activePollInterval : Self.idlePollInterval)
     }
 
     private var effectPolicy: LidEffectPolicy {
-        LidEffectPolicy(threshold: preferences.thresholdAngle, hysteresis: preferences.hysteresis)
+        LidEffectPolicy(threshold: effectiveThresholdAngle, hysteresis: preferences.hysteresis)
     }
 
     /// Whether the picture belongs on screen for this angle. It widens the
@@ -306,12 +380,11 @@ final class LidController: ObservableObject {
         }
 
         let now = CACurrentMediaTime()
-        let threshold = preferences.thresholdAngle
+        let threshold = effectiveThresholdAngle
         let minimumDurationElapsed = now - startedAt > Self.minimumEffectDuration
 
-        if !isActive, preferences.isTimeoutEnabled, timeoutAwaitingRelease {
-            guard angle >= threshold else { return false }
-            timeoutAwaitingRelease = false
+        if !isActive, timeoutAwaitingRelease {
+            guard evaluateTimeoutCancellation(angle: angle) else { return false }
         }
 
         let wanted = effectPolicy.wantsEffect(
@@ -376,7 +449,7 @@ final class LidController: ObservableObject {
         } else if !isClosingOut {
             // The ease back to flat still draws the live picture, and this
             // would free it.
-            updatePrewarm(angle: angle, ceiling: preferences.thresholdAngle + preferences.prewarmCeiling)
+            updatePrewarm(angle: angle, ceiling: effectiveThresholdAngle + preferences.prewarmCeiling)
         }
     }
 
@@ -453,6 +526,7 @@ final class LidController: ObservableObject {
     private func setActive(_ active: Bool) {
         isActive = active
         if active {
+            escapeHatch.enable()
             peakAngle = rawAngle
             openDwell.reset()
             isClosingOut = false
@@ -466,6 +540,9 @@ final class LidController: ObservableObject {
             setPollInterval(Self.activePollInterval)
             presentPicture()
         } else {
+            if !isClosingOut {
+                escapeHatch.disable()
+            }
             snapshotter.discard()
             timeoutReferenceAngle = nil
             beginClosingOut()
@@ -480,6 +557,7 @@ final class LidController: ObservableObject {
         guard overlay.isVisible, displayLink != nil else {
             stopDisplayLink()
             overlay.dismiss(animated: true)
+            escapeHatch.disable()
             return
         }
         isClosingOut = true
@@ -490,6 +568,7 @@ final class LidController: ObservableObject {
         isClosingOut = false
         stopDisplayLink()
         overlay.dismiss(animated: true)
+        escapeHatch.disable()
     }
 
     private func endEffect() {
@@ -503,7 +582,7 @@ final class LidController: ObservableObject {
         if preferences.isLivePicture, let screen = NSScreen.builtIn,
            overlay.showLive(
                on: screen,
-               startAngle: preferences.thresholdAngle,
+               startAngle: effectiveThresholdAngle,
                tuning: tuning,
                fadeIn: Self.fadeInDuration
            ) {
@@ -579,7 +658,7 @@ final class LidController: ObservableObject {
         overlay.show(
             image: image,
             on: screen,
-            startAngle: preferences.thresholdAngle,
+            startAngle: effectiveThresholdAngle,
             tuning: tuning,
             fadeIn: Self.fadeInDuration
         )
@@ -589,7 +668,7 @@ final class LidController: ObservableObject {
 
     private func blurProgress(for angle: Double) -> Double {
         let span = max(preferences.blurSpan, 1)
-        return min(max((preferences.thresholdAngle - angle) / span, 0), 1)
+        return min(max((effectiveThresholdAngle - angle) / span, 0), 1)
     }
 
     // MARK: - Animation
@@ -620,7 +699,7 @@ final class LidController: ObservableObject {
         if let frame = streamer.newFrame() {
             overlay.absorb(frame)
         }
-        let target = isClosingOut ? preferences.thresholdAngle : rawAngle
+        let target = isClosingOut ? effectiveThresholdAngle : rawAngle
         visualAngle.advance(to: target, dt: dt)
 
         guard isClosingOut else {
@@ -722,7 +801,16 @@ final class LidController: ObservableObject {
         if let angle = sensor.angle() {
             rawAngle = angle
             visualAngle.reset(to: angle)
+            observedMaxAngle = max(observedMaxAngle, angle)
         }
         setPollInterval(Self.idlePollInterval)
+    }
+
+    deinit {
+        #if DEBUG
+        if let previewObserver {
+            DistributedNotificationCenter.default().removeObserver(previewObserver)
+        }
+        #endif
     }
 }

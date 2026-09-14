@@ -90,8 +90,8 @@ struct LidEffectPolicyTests {
         #expect(!dwell.hasDwelled(at: 10.5, duration: 1))
         #expect(dwell.hasDwelled(at: 11, duration: 1))
 
-        // Jitter back toward the start angle restarts the wait.
-        dwell.update(angle: 130.5, at: 11.1, dwellAngle: dwellAngle)
+        // Jitter back below the start angle restarts the wait.
+        dwell.update(angle: 129.5, at: 11.1, dwellAngle: dwellAngle)
         dwell.update(angle: 131, at: 11.2, dwellAngle: dwellAngle)
         #expect(!dwell.hasDwelled(at: 12, duration: 1))
     }
