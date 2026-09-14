@@ -17,6 +17,17 @@
 "Blur radius at the far edge." = "画面远端边缘的模糊半径。";
 "Blur spread" = "模糊范围";
 "0 blurs the far edge only, 100 the whole picture." = "0 仅模糊远端边缘，100 则模糊整个画面。";
+"Blur color" = "模糊颜色";
+"Custom color" = "自定义颜色";
+"Black" = "黑色";
+"White" = "白色";
+"Slate" = "板岩灰";
+"Navy" = "藏青";
+"Purple" = "紫色";
+"Cyan" = "青色";
+"Orange" = "橙色";
+"Rose" = "玫瑰红";
+"Emerald" = "翠绿";
 "Dimming" = "变暗强度";
 "How dark the far edge goes." = "画面远端边缘的变暗程度。";
 "Dimming spread" = "变暗范围";
@@ -35,4 +46,5 @@
 "Could not open System Settings. Open it manually and enable screen recording for Mac Duo under Privacy & Security." = "无法打开系统设置。请手动打开，在“隐私与安全性”中为 Mac Duo 开启屏幕录制权限。";
 "Language" = "语言";
 "System" = "跟随系统";
+"Spanish" = "西班牙语";
 "Chinese (Simplified)" = "简体中文";

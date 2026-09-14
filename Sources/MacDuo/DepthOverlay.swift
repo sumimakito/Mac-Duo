@@ -63,6 +63,8 @@ struct DepthTuning {
     var dimReach: Double = 0.7
     var maxBlurRadius: Double = 55
     var maxDim: Double = 0.4
+    var blurColor: SIMD4<Float> = SIMD4<Float>(0, 0, 0, 1)
+    var blurCGColor: CGColor = CGColor(red: 0, green: 0, blue: 0, alpha: 1)
 }
 
 private final class MetalHostView: NSView {
@@ -164,7 +166,7 @@ final class DepthOverlay {
         screenSize = screen.frame.size
 
         let pixelScale = Double(screen.backingScaleFactor)
-        guard renderer.beginLive(screenSize: screenSize, pixelScale: CGFloat(pixelScale)) else { return false }
+        guard renderer.beginLive(screenSize: screenSize, pixelScale: CGFloat(pixelScale), blurColor: tuning.blurColor) else { return false }
         buildToken += 1
         makeWindow(on: screen, pixelScale: pixelScale)
         return window != nil
@@ -216,9 +218,10 @@ final class DepthOverlay {
         buildToken += 1
         let token = buildToken
         let size = screenSize
+        let blurCGColor = tuning.blurCGColor
         buildQueue.async { [weak self, weak renderer] in
             guard let renderer else { return }
-            let picture = renderer.makePicture(image: image, screenSize: size, pixelScale: CGFloat(pixelScale))
+            let picture = renderer.makePicture(image: image, screenSize: size, pixelScale: CGFloat(pixelScale), blurColor: blurCGColor)
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     guard let self, self.buildToken == token, self.window === window,
@@ -287,7 +290,8 @@ final class DepthOverlay {
             dimHingeFloor: gradient.dimHingeFloor,
             dimReach: tuning.dimReach,
             maxBlurRadius: tuning.maxBlurRadius,
-            maxDim: tuning.maxDim
+            maxDim: tuning.maxDim,
+            blurColor: tuning.blurColor
         )
     }
 
