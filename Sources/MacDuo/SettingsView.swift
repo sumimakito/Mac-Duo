@@ -166,6 +166,7 @@ struct SettingsView: View {
                     Text(localized("System")).tag("")
                     Text(verbatim: "English").tag(SettingsLanguage.english.rawValue)
                     Text(localized("Chinese (Simplified)")).tag(SettingsLanguage.chinese.rawValue)
+                    Text(localized("Spanish")).tag(SettingsLanguage.spanish.rawValue)
                 }
                 .labelsHidden()
                 .pickerStyle(.menu)
