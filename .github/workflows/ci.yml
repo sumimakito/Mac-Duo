@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-and-build:
+    name: Build & Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, macos-15]
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Run unit test suites
+        run: |
+          set -euo pipefail
+          if [ -z "${SDKROOT:-}" ] && [ -d "/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk" ]; then
+            export SDKROOT="/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk"
+          fi
+          swift test --parallel
+
+      - name: Build application bundle and CLI tool
+        run: |
+          set -euo pipefail
+          ./build.sh
+
+      - name: Validate build artifacts and codesigning
+        run: |
+          set -euo pipefail
+          echo "Verifying application bundle existence and structure..."
+          test -d "build/Mac Duo.app"
+          test -f "build/Mac Duo.app/Contents/MacOS/MacDuo"
+          test -x "build/Mac Duo.app/Contents/MacOS/MacDuo"
+          test -f "build/Mac Duo.app/Contents/Info.plist"
+          test -d "build/Mac Duo.app/Contents/Resources"
+
+          echo "Verifying lidprobe CLI diagnostic tool..."
+          test -f "build/lidprobe"
+          test -x "build/lidprobe"
+
+          echo "Verifying ad-hoc code signature of Mac Duo.app..."
+          codesign --verify --strict --verbose=2 "build/Mac Duo.app"
+          codesign -dv "build/Mac Duo.app"
+
+          echo "CI validation completed successfully."
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: Mac-Duo-${{ matrix.os }}
+          path: |
+            build/Mac Duo.app
+            build/lidprobe
+          retention-days: 14
