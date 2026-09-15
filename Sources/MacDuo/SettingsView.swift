@@ -165,6 +165,7 @@ struct SettingsView: View {
                 Picker("", selection: $language) {
                     Text(localized("System")).tag("")
                     Text(verbatim: "English").tag(SettingsLanguage.english.rawValue)
+                    Text(localized("Korean")).tag(SettingsLanguage.korean.rawValue)
                     Text(localized("Chinese (Simplified)")).tag(SettingsLanguage.chinese.rawValue)
                 }
                 .labelsHidden()
