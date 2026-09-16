@@ -19,7 +19,7 @@ enum SettingsLanguage: String {
     }
 
     private var bundle: Bundle {
-        guard let path = Self.resources.path(forResource: rawValue.lowercased(), ofType: "lproj"),
+        guard let path = Self.resources.path(forResource: rawValue, ofType: "lproj"),
               let bundle = Bundle(path: path) else { return Self.resources }
         return bundle
     }
