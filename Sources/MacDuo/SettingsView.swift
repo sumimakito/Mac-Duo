@@ -65,6 +65,7 @@ struct SettingsView: View {
                 .padding(.bottom, 12)
         }
         .frame(width: Self.width)
+        .id(language)
         .onAppear { hasScreenPermission = CGPreflightScreenCaptureAccess() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             hasScreenPermission = CGPreflightScreenCaptureAccess()
