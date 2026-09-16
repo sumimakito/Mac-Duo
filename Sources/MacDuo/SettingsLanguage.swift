@@ -6,8 +6,13 @@ enum SettingsLanguage: String {
     case chinese = "zh-Hans"
 
     static var preferred: Self {
-        Bundle.preferredLocalizations(from: ["en", "zh-Hans"])
-            .first == "zh-Hans" ? .chinese : .english
+        // Read the system language straight from the user's preferences, not
+        // `Bundle.preferredLocalizations`: the main app bundle is not localized
+        // for Chinese (the .lproj files live in the embedded resource bundle),
+        // so the process runs as its development region (en) and
+        // `preferredLocalizations` reports en regardless of the system setting.
+        let isChinese = Locale.preferredLanguages.contains { $0.hasPrefix("zh") }
+        return isChinese ? .chinese : .english
     }
 
     // Packaged apps keep resources in Contents/Resources; SwiftPM's generated
