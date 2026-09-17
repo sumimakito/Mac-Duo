@@ -4,10 +4,15 @@ import Foundation
 enum SettingsLanguage: String {
     case english = "en"
     case chinese = "zh-Hans"
+    case turkish = "tr"
 
     static var preferred: Self {
-        Bundle.preferredLocalizations(from: ["en", "zh-Hans"])
-            .first == "zh-Hans" ? .chinese : .english
+        let prefs = Bundle.preferredLocalizations(from: ["en", "zh-Hans", "tr"])
+        if let first = prefs.first {
+            if first == "zh-Hans" { return .chinese }
+            if first == "tr" { return .turkish }
+        }
+        return .english
     }
 
     // Packaged apps keep resources in Contents/Resources; SwiftPM's generated
