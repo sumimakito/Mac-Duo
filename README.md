@@ -38,6 +38,24 @@ These downloads contain the latest [development build](https://github.com/sumima
 Requires macOS 14 or later and a MacBook with a compatible lid angle sensor.
 Grant Screen Recording permission when prompted to enable the effect.
 
+## Imported images
+
+Use **Import image…** in the menu-bar settings to choose a PNG, JPEG, HEIC, or TIFF.
+The editor preserves the image’s proportions:
+
+- **Fill / crop** covers the built-in display and crops the excess.
+- **Fit whole image** shows everything, using black borders when needed.
+- **Size**, **Left / right**, and **Down / up** adjust zoom and placement.
+- **Reset**, **Cancel**, and **Use image** reset, discard, or apply the edit.
+
+After applying, switch between **Desktop** and **Imported image**, or reopen
+**Crop / resize…** to adjust the original again. The original image, crop settings, and selected source are saved locally in
+`~/Library/Application Support/to.maki.MacDuo/imported-image.plist` and restored
+on launch. Moving or deleting the original file does not break the saved image. Imported-image effects use the local image instead
+of screen capture; live-rendering controls apply only to Desktop mode.
+
+Run image-placement and editor tests with `swift test`.
+
 ## Build
 
 Requires Xcode with Swift 6.0 or later. Run from the project directory:

@@ -36,3 +36,40 @@
 "Language" = "语言";
 "System" = "跟随系统";
 "Chinese (Simplified)" = "简体中文";
+
+"Picture" = "画面";
+
+"Picture source" = "画面来源";
+
+"Desktop" = "桌面";
+
+"Imported image" = "导入的图片";
+
+"Import image…" = "导入图片…";
+
+"Crop / resize…" = "裁剪 / 缩放…";
+
+
+"Could not open this image." = "无法打开此图片。";
+
+"Crop and resize image" = "裁剪与缩放图片";
+
+"Size" = "大小";
+
+"Left / right" = "左右位置";
+
+"Down / up" = "上下位置";
+
+"Proportions stay unchanged. Fit adds black borders where needed." = "始终保持原始比例；完整显示时，空余区域填充黑色。";
+
+"Cancel" = "取消";
+
+"Use image" = "使用图片";
+
+"Fill / crop" = "填满 / 裁剪";
+
+"Fit whole image" = "完整显示";
+
+"Your image, crop settings, and picture source are saved locally and restored on launch." = "图片、裁剪设置和画面来源会保存在本机，并在启动时恢复。";
+
+"Could not save the image locally. Your previous image is unchanged." = "无法在本机保存图片。此前的图片保持不变。";

@@ -6,6 +6,7 @@ let package = Package(
     defaultLocalization: "en",
     platforms: [.macOS(.v14)],
     targets: [
+        .testTarget(name: "MacDuoTests", dependencies: ["MacDuo"]),
         .target(
             name: "LidAngleKit",
             path: "Sources/LidAngleKit",

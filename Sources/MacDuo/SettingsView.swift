@@ -42,7 +42,8 @@ struct SettingsView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 10) {
                         switches
-                        if !hasScreenPermission {
+                        imageGroup
+                        if !hasScreenPermission && !controller.usesImportedImage {
                             permissionNotice
                         }
                         startGroup
@@ -101,8 +102,36 @@ struct SettingsView: View {
                 isOn: $preferences.isLivePicture,
                 help: localized("Off holds the frame from when the effect started.")
             )
-            .disabled(!preferences.isEnabled)
+            .disabled(!preferences.isEnabled || controller.usesImportedImage)
         }
+    }
+
+    private var imageGroup: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(localized("Picture")).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            if let name = controller.importedImageName {
+                Picker(localized("Picture source"), selection: Binding(
+                    get: { controller.usesImportedImage },
+                    set: { controller.selectImportedImage($0) }
+                )) {
+                    Text(localized("Desktop")).tag(false)
+                    Text(localized("Imported image")).tag(true)
+                }
+                .pickerStyle(.segmented)
+                Text(name).font(.caption).lineLimit(1).truncationMode(.middle)
+            }
+            HStack {
+                Button(localized("Import image…")) { controller.importImage() }
+                if controller.importedImageName != nil {
+                    Button(localized("Crop / resize…")) { controller.adjustImage() }
+                }
+            }
+            .controlSize(.small)
+            Text(localized("Your image, crop settings, and picture source are saved locally and restored on launch."))
+                .font(.caption2).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .disabled(controller.isEditingImage)
     }
 
     private var startGroup: some View {
