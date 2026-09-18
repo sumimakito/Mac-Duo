@@ -107,6 +107,9 @@ final class DepthOverlay {
     private var tuning = DepthTuning()
     private var fadeIn: TimeInterval = 0.07
     private var hasRevealed = false
+    /// A user picture is on its way (or in place) for this run. The window
+    /// stays hidden until it lands, so the picture never pops in late.
+    private var expectsOverlay = false
 
     var isVisible: Bool { window != nil }
     var isPictureReady: Bool { renderer?.isReady ?? false }
@@ -148,13 +151,15 @@ final class DepthOverlay {
     }
 
     /// Puts up a window for a live stream. It stays transparent until the
-    /// first frame is absorbed.
+    /// first frame is absorbed. `overlay` is one user picture composited into
+    /// the picture space, sharing its perspective, blur and dimming.
     @discardableResult
     func showLive(
         on screen: NSScreen,
         startAngle: Double,
         tuning: DepthTuning,
-        fadeIn: TimeInterval
+        fadeIn: TimeInterval,
+        overlay topOverlay: CGImage? = nil
     ) -> Bool {
         dismiss(animated: false)
         guard warmUp(), let renderer else { return false }
@@ -167,7 +172,11 @@ final class DepthOverlay {
         guard renderer.beginLive(screenSize: screenSize, pixelScale: CGFloat(pixelScale)) else { return false }
         buildToken += 1
         makeWindow(on: screen, pixelScale: pixelScale)
-        return window != nil
+        guard let window else { return false }
+        if let topOverlay {
+            buildOverlay(topOverlay, token: buildToken, window: window)
+        }
+        return true
     }
 
     /// Hands one live frame to the renderer and reveals the window once the
@@ -194,7 +203,8 @@ final class DepthOverlay {
         on screen: NSScreen,
         startAngle: Double,
         tuning: DepthTuning,
-        fadeIn: TimeInterval
+        fadeIn: TimeInterval,
+        overlay topOverlay: CGImage? = nil
     ) {
         dismiss(animated: false)
         // The screenshot's screen can be stale once the lid shuts into
@@ -216,15 +226,45 @@ final class DepthOverlay {
         buildToken += 1
         let token = buildToken
         let size = screenSize
+        expectsOverlay = topOverlay != nil
         buildQueue.async { [weak self, weak renderer] in
             guard let renderer else { return }
             let picture = renderer.makePicture(image: image, screenSize: size, pixelScale: CGFloat(pixelScale))
+            let overlay = topOverlay.flatMap { renderer.prepareOverlay(image: $0) }
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     guard let self, self.buildToken == token, self.window === window,
                           let picture else { return }
                     renderer.adopt(picture)
+                    if let overlay {
+                        renderer.adoptOverlay(overlay)
+                    } else if self.expectsOverlay {
+                        // The picture failed to build: fall back to the
+                        // screen alone rather than holding the window dark.
+                        self.expectsOverlay = false
+                    }
                     self.update(progress: 0, currentAngle: self.startAngle, tuning: self.tuning)
+                    self.reveal()
+                }
+            }
+        }
+    }
+
+    /// Builds one user picture off the main thread and adopts it for this
+    /// run's window. A failure clears the expectation so the screen alone
+    /// still shows.
+    private func buildOverlay(_ image: CGImage, token: Int, window: OverlayWindow) {
+        expectsOverlay = true
+        buildQueue.async { [weak self, weak renderer] in
+            let overlay = renderer?.prepareOverlay(image: image)
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    guard let self, let renderer, self.buildToken == token, self.window === window else { return }
+                    if let overlay {
+                        renderer.adoptOverlay(overlay)
+                    } else {
+                        self.expectsOverlay = false
+                    }
                     self.reveal()
                 }
             }
@@ -259,9 +299,11 @@ final class DepthOverlay {
     }
 
     /// Fades the window in once, and only once the picture has something to
-    /// draw.
+    /// draw. With a user picture expected, it additionally waits for that
+    /// picture, so it never pops in a frame late.
     private func reveal() {
         guard let window, !hasRevealed, renderer?.isReady == true else { return }
+        if expectsOverlay, renderer?.hasOverlay != true { return }
         hasRevealed = true
         NSAnimationContext.runAnimationGroup { context in
             context.duration = fadeIn
@@ -296,7 +338,9 @@ final class DepthOverlay {
         guard let window else { return }
         self.window = nil
         buildToken += 1
+        expectsOverlay = false
         renderer?.release()
+        renderer?.clearOverlay()
 
         guard animated else {
             window.orderOut(nil)

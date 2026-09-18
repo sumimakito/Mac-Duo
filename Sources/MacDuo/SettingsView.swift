@@ -1,10 +1,12 @@
 import AppKit
 import ServiceManagement
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @ObservedObject var preferences: Preferences
     @ObservedObject var controller: LidController
+    @ObservedObject var overlays: OverlayImageStore = .shared
 
     /// Empty means following the system language.
     @AppStorage("settingsLanguage") private var language = ""
@@ -47,6 +49,7 @@ struct SettingsView: View {
                         }
                         startGroup
                         lookGroup
+                        picturesGroup
                         perspectiveGroup
                     }
                     .padding(.horizontal, Self.inset)
@@ -65,7 +68,10 @@ struct SettingsView: View {
                 .padding(.bottom, 12)
         }
         .frame(width: Self.width)
-        .onAppear { hasScreenPermission = CGPreflightScreenCaptureAccess() }
+        .onAppear {
+            hasScreenPermission = CGPreflightScreenCaptureAccess()
+            overlays.reload()
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             hasScreenPermission = CGPreflightScreenCaptureAccess()
         }
@@ -141,6 +147,73 @@ struct SettingsView: View {
                 localized("Dimming spread"), value: $preferences.dimReach, in: 0.2...1, format: "%.0f%%", scale: 100,
                 help: localized("Everything above this height goes fully dark.")
             )
+        }
+    }
+
+    private var picturesGroup: some View {
+        group(localized("Pictures")) {
+            Picker(localized("Pictures"), selection: $preferences.overlayMode) {
+                Text(localized("Off")).tag(OverlayMode.off.rawValue)
+                Text(localized("Instead of screen")).tag(OverlayMode.replace.rawValue)
+                Text(localized("On top of blur")).tag(OverlayMode.onTop.rawValue)
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+            .accessibilityLabel(localized("Pictures"))
+            description(localized("One random picture is picked each time the effect starts. Pictures tilt, blur and dim with the screen."))
+            if preferences.overlayMode != OverlayMode.off.rawValue {
+                if overlays.pictures.isEmpty {
+                    Text(localized("No pictures yet. Add one to get started."))
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 72), spacing: 8)], spacing: 8) {
+                        ForEach(overlays.pictures) { picture in
+                            ZStack(alignment: .topTrailing) {
+                                if let thumb = overlays.thumbnail(for: picture) {
+                                    Image(nsImage: thumb)
+                                        .resizable()
+                                        .aspectRatio(contentMode: .fill)
+                                        .frame(width: 72, height: 72)
+                                        .clipped()
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                                } else {
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .fill(Color.secondary.opacity(0.2))
+                                        .frame(width: 72, height: 72)
+                                }
+                                Button {
+                                    overlays.remove(picture)
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundStyle(.primary, .quaternary)
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel(localized("Remove picture"))
+                                .offset(x: 4, y: -4)
+                            }
+                            .help(picture.name)
+                        }
+                    }
+                }
+                HStack {
+                    Spacer()
+                    Button(localized("Add…")) { pickPictures() }
+                        .controlSize(.small)
+                }
+            }
+        }
+    }
+
+    private func pickPictures() {
+        let panel = NSOpenPanel()
+        panel.title = localized("Choose pictures")
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        panel.allowedContentTypes = [.image]
+        if panel.runModal() == .OK {
+            overlays.add(from: panel.urls)
         }
     }
 

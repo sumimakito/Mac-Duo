@@ -19,11 +19,13 @@ final class Preferences: ObservableObject {
         static let dimReach = "dimReach"
         static let showsAngleInMenuBar = "showsAngleInMenuBar"
         static let isLivePicture = "isLivePicture"
+        static let overlayMode = "overlayMode"
+        static let overlayImageIDs = "overlayImageIDs"
 
         static let all = [
             isEnabled, isTimeoutEnabled, thresholdAngle, blurSpan, maxBlurRadius,
             maxDim, viewingDistance, recession, blurEvenness, dimReach,
-            showsAngleInMenuBar, isLivePicture,
+            showsAngleInMenuBar, isLivePicture, overlayMode,
         ]
     }
 
@@ -40,6 +42,7 @@ final class Preferences: ObservableObject {
         Key.dimReach: 0.5,
         Key.showsAngleInMenuBar: false,
         Key.isLivePicture: true,
+        Key.overlayMode: OverlayMode.off.rawValue,
     ]
 
     /// Master switch for the depth effect.
@@ -108,6 +111,17 @@ final class Preferences: ObservableObject {
         didSet { defaults.set(isLivePicture, forKey: Key.isLivePicture) }
     }
 
+    /// What user pictures do in the effect. See `OverlayMode`. The picture
+    /// library itself (`overlayImageIDs`) is user content and survives Reset.
+    @Published var overlayMode: Int {
+        didSet { defaults.set(overlayMode, forKey: Key.overlayMode) }
+    }
+
+    /// Ordered ids of the picture library. Not part of `Key.all`.
+    @Published var overlayImageIDs: [String] {
+        didSet { defaults.set(overlayImageIDs, forKey: Key.overlayImageIDs) }
+    }
+
     /// Eye distance in screen heights, at the two ends of the perspective
     /// slider. The panel offers the strength, which runs the other way.
     static let farthestEye: Double = 6
@@ -154,6 +168,8 @@ final class Preferences: ObservableObject {
         dimReach = defaults.double(forKey: Key.dimReach)
         showsAngleInMenuBar = defaults.bool(forKey: Key.showsAngleInMenuBar)
         isLivePicture = defaults.bool(forKey: Key.isLivePicture)
+        overlayMode = defaults.integer(forKey: Key.overlayMode)
+        overlayImageIDs = defaults.stringArray(forKey: Key.overlayImageIDs) ?? []
     }
 
     func resetToDefaults() {
@@ -172,5 +188,6 @@ final class Preferences: ObservableObject {
         dimReach = defaults.double(forKey: Key.dimReach)
         showsAngleInMenuBar = defaults.bool(forKey: Key.showsAngleInMenuBar)
         isLivePicture = defaults.bool(forKey: Key.isLivePicture)
+        overlayMode = defaults.integer(forKey: Key.overlayMode)
     }
 }

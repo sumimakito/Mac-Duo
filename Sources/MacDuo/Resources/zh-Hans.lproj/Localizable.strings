@@ -25,6 +25,15 @@
 "Lean back" = "后倾幅度";
 "Degrees of lean per degree of closing. 1 holds it still." = "每合上 1° 时画面的后倾角度。设为 1 时，画面在空间中保持不动。";
 "0 keeps the sides parallel, 100 converges sharply." = "0 保持两侧平行，100 则使两侧明显向内收拢。";
+"Pictures" = "图片";
+"Off" = "关闭";
+"Instead of screen" = "替代屏幕";
+"On top of blur" = "叠加在模糊上";
+"One random picture is picked each time the effect starts. Pictures tilt, blur and dim with the screen." = "每次效果触发时随机挑选一张图片。图片会随屏幕一起倾斜、模糊和变暗。";
+"No pictures yet. Add one to get started." = "还没有图片。添加一张开始使用。";
+"Add…" = "添加…";
+"Choose pictures" = "选择图片";
+"Remove picture" = "移除图片";
 "Show angle in menu bar" = "在菜单栏显示角度";
 "Launch at login" = "登录时启动";
 "Reset" = "重置";
