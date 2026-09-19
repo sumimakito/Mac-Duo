@@ -154,11 +154,18 @@ final class ScreenSnapshotter {
             )
             guard let display = content.displays.first(where: { $0.displayID == displayID }) else {
                 filter = nil
+                filterDisplayID = nil
                 return
             }
             // Exclude ourselves, or a lingering overlay lands in the next snapshot.
-            let bundleID = Bundle.main.bundleIdentifier
-            let ownApplications = content.applications.filter { $0.bundleIdentifier == bundleID }
+            guard let ownApplications = CaptureFilterSafety.excludedApplications(in: content) else {
+                Diagnostics.geometry.error(
+                    "snapshot cannot exclude this app: its presence window is not shareable yet"
+                )
+                filter = nil
+                filterDisplayID = nil
+                return
+            }
             filter = SCContentFilter(
                 display: display,
                 excludingApplications: ownApplications,
