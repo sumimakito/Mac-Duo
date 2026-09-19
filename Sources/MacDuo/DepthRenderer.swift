@@ -51,6 +51,11 @@ final class DepthRenderer {
     private var paddedOrigin: CGPoint = .zero
     private var paddedSize: CGSize = .zero
     private var maxLevel: Float = 0
+    /// Corner radius (points) the cover is rounded to, in screen space. The
+    /// fragment shader paints the corner pixels black, the same colour as the
+    /// margin, so the folded picture follows the display's physical corners.
+    /// 0 means no rounding.
+    var cornerRadius: CGFloat = 0
 
     /// The picture a live stream writes into. `makePicture` builds its own
     /// texture instead, so only one of the two is in use at a time.
@@ -444,7 +449,7 @@ final class DepthRenderer {
                 Float(maxBlurRadius * Double(pixelScale)), Float(blurStrength)
             ),
             shape: SIMD4(Float(hingeFloor), Float(maxDim), Float(pixelScale), maxLevel),
-            light: SIMD4(Float(dimHingeFloor), Float(dimStrength), Float(dimReach), 0)
+            light: SIMD4(Float(dimHingeFloor), Float(dimStrength), Float(dimReach), Float(cornerRadius))
         )
 
         let pass = MTLRenderPassDescriptor()

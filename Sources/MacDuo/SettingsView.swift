@@ -41,13 +41,13 @@ struct SettingsView: View {
             if controller.isSensorAvailable {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 10) {
-                        switches
+                        card { switches }
                         if !hasScreenPermission {
                             permissionNotice
                         }
-                        startGroup
-                        lookGroup
-                        perspectiveGroup
+                        card { startGroup }
+                        card { lookGroup }
+                        card { perspectiveGroup }
                     }
                     .padding(.horizontal, Self.inset)
                     .padding(.vertical, 10)
@@ -249,7 +249,7 @@ struct SettingsView: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+        .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: CornerRadius.notice))
     }
 
     private func openScreenRecordingSettings() {
@@ -276,6 +276,18 @@ struct SettingsView: View {
             content()
         }
         .disabled(!preferences.isEnabled)
+    }
+
+    /// Wraps content in a panel with the app's unified Apple-style card corner
+    /// radius and a faint background, so every settings group shares one look.
+    private func card<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        content()
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                Color(nsColor: .quaternaryLabelColor).opacity(0.35),
+                in: RoundedRectangle(cornerRadius: CornerRadius.card)
+            )
     }
 
     private func slider(

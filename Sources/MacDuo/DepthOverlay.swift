@@ -65,6 +65,10 @@ struct DepthTuning {
     var maxDim: Double = 0.4
 }
 
+/// Hosts the metal layer. The rounded corners are painted in the fragment
+/// shader, not here: a layer mask was tried and removed because it punched
+/// transparent corners that let the real, un-tilted desktop show through,
+/// which read as a disjointed seam against the folded picture.
 private final class MetalHostView: NSView {
     init(layer metalLayer: CALayer, scale: CGFloat) {
         super.init(frame: .zero)
@@ -236,6 +240,14 @@ final class DepthOverlay {
         let view = MetalHostView(layer: renderer.makeLayer(), scale: CGFloat(pixelScale))
         view.frame = NSRect(origin: .zero, size: screenSize)
         view.autoresizingMask = [.width, .height]
+
+        // The overlay is a full-screen cover, so its outer edge has to follow
+        // the display's rounded corners. The fragment shader paints the corner
+        // pixels with the same black as the margin, which matches the physical
+        // bezel. Transparency is not an option: a shielding-level window does
+        // not respect the drawable alpha, and a layer mask here punched holes
+        // that revealed the real desktop.
+        renderer.cornerRadius = CornerRadius.display
 
         let window = OverlayWindow(
             contentRect: screen.frame,
