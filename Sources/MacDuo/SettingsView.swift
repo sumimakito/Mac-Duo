@@ -102,6 +102,12 @@ struct SettingsView: View {
                 help: localized("Off holds the frame from when the effect started.")
             )
             .disabled(!preferences.isEnabled)
+            toggleRow(
+                localized("External displays follow lid"),
+                isOn: $preferences.includesExternalDisplays,
+                help: localized("Applies the effect to each external display as the MacBook lid closes.")
+            )
+            .disabled(!preferences.isEnabled)
         }
     }
 

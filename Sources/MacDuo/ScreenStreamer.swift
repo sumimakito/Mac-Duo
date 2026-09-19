@@ -72,6 +72,7 @@ final class ScreenStreamer {
         }
     }
 
+    private let displayID: CGDirectDisplayID
     private let device: MTLDevice?
     private var stream: SCStream?
     private var receiver: Receiver?
@@ -90,14 +91,16 @@ final class ScreenStreamer {
     private(set) var isStarted = false
     private(set) var screen: NSScreen?
 
-    init(device: MTLDevice? = MTLCreateSystemDefaultDevice()) {
+    init(displayID: CGDirectDisplayID, device: MTLDevice? = MTLCreateSystemDefaultDevice()) {
+        self.displayID = displayID
         self.device = device
     }
 
     /// Begins capturing, or does nothing if it is already running.
     func start() {
         guard !isStarted, startTask == nil, device != nil else { return }
-        guard let target = NSScreen.builtIn, let displayID = target.displayID else { return }
+        let displayID = self.displayID
+        guard let target = NSScreen.screens.first(where: { $0.displayID == displayID }) else { return }
         screen = target
         isStarted = true
         startTask = Task { [weak self] in
@@ -124,7 +127,6 @@ final class ScreenStreamer {
 
     /// Builds the capture filter without starting anything.
     func warmFilter() async {
-        guard let displayID = NSScreen.builtIn?.displayID else { return }
         guard filter == nil || filterDisplayID != displayID else { return }
         await rebuildFilter(displayID: displayID)
     }
@@ -156,7 +158,11 @@ final class ScreenStreamer {
             if filter == nil || filterDisplayID != displayID {
                 await rebuildFilter(displayID: displayID)
             }
-            guard !Task.isCancelled, isStarted, let activeFilter = filter else { return }
+            guard !Task.isCancelled, isStarted else { return }
+            guard let activeFilter = filter else {
+                isStarted = false
+                return
+            }
 
             let configuration = SCStreamConfiguration()
             configuration.width = Int(activeFilter.contentRect.width * CGFloat(activeFilter.pointPixelScale))
@@ -185,7 +191,7 @@ final class ScreenStreamer {
             self.screen = target
             Diagnostics.geometry.notice(
                 """
-                stream started \(configuration.width)x\(configuration.height) px in \
+                stream display \(self.displayID) started \(configuration.width)x\(configuration.height) px in \
                 \((CFAbsoluteTimeGetCurrent() - started) * 1000, format: .fixed(precision: 1)) ms
                 """
             )

@@ -197,9 +197,10 @@ final class DepthOverlay {
         fadeIn: TimeInterval
     ) {
         dismiss(animated: false)
-        // The screenshot's screen can be stale once the lid shuts into
-        // clamshell mode, so no window goes up at its old frame.
-        guard let displayID = screen.displayID, displayID == NSScreen.builtIn?.displayID else { return }
+        // A captured display can disappear on disconnect or clamshell entry.
+        // Resolve its current screen while allowing opted-in external displays.
+        guard let displayID = screen.displayID,
+              let screen = NSScreen.screens.first(where: { $0.displayID == displayID }) else { return }
         guard warmUp(), let renderer else { return }
         self.startAngle = startAngle
         self.tuning = tuning
@@ -316,6 +317,14 @@ final class DepthOverlay {
                 window.close()
             }
         }
+    }
+
+    func dispose() {
+        dismiss(animated: false)
+        discardLive()
+        presenceWindow?.orderOut(nil)
+        presenceWindow?.close()
+        presenceWindow = nil
     }
 
     /// Takes down a window that is still fading.

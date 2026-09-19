@@ -8,13 +8,6 @@ import QuartzCore
 /// A timer polls the sensor, and a display link advances a spring at the
 /// screen refresh rate so the ramp stays smooth between readings.
 
-/// Identity of the built-in display. `NSApplication` posts a screen change for
-/// a backlight change too, and this tells the two apart.
-struct Layout: Equatable {
-    var displayID: CGDirectDisplayID?
-    var frame: CGRect?
-}
-
 @MainActor
 final class LidController: ObservableObject {
 
@@ -22,15 +15,12 @@ final class LidController: ObservableObject {
     @Published private(set) var isSensorAvailable = false
     @Published private(set) var isActive = false
 
-    let snapshotter = ScreenSnapshotter()
-
     private let preferences: Preferences
     private let sensor = LidAngleSensor()
-    private let overlay = DepthOverlay()
-    private let streamer = ScreenStreamer()
+    private var effects: [DisplayEffect] = []
 
     private var enabledSubscription: AnyCancellable?
-    private var pictureTask: Task<Void, Never>?
+    private var displaysSubscription: AnyCancellable?
     private var pollTimer: Timer?
     private var pollInterval: TimeInterval = 0
     private var displayLink: CADisplayLink?
@@ -48,7 +38,6 @@ final class LidController: ObservableObject {
     private var startedAt: CFTimeInterval = 0
     private var preview: PreviewRun?
     private var isSuspended = false
-    private var isCapturePending = false
     private var motionIntent = LidMotionIntent()
     private var openDwell = LidOpenDwell()
     /// Where the lid last moved to by more than `timeoutMovementThreshold`,
@@ -64,11 +53,11 @@ final class LidController: ObservableObject {
     /// True while `beginClosingOut()` is easing the picture back to flat.
     private var isClosingOut = false
     private var closingOutStartedAt: CFTimeInterval = 0
-    private var builtInLayout = Layout()
     private var peakAngle: Double = 0
     /// The lowest reading since the effect started. Opening releases only
     /// once the lid has risen `LidEffectPolicy.minimumReleaseRise` above it.
     private var lowestRunAngle: Double = 0
+    private var displayLayouts: [DisplayLayout] = []
 
     private static let idlePollInterval: TimeInterval = 1.0 / 8
     private static let activePollInterval: TimeInterval = 1.0 / 30
@@ -145,6 +134,11 @@ final class LidController: ObservableObject {
                 guard !enabled else { return }
                 self?.disableEffect()
             }
+        displaysSubscription = preferences.$includesExternalDisplays
+            .removeDuplicates()
+            .dropFirst()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.refreshDisplays() }
     }
 
     // MARK: - Lifecycle
@@ -158,8 +152,8 @@ final class LidController: ObservableObject {
             currentAngle = angle
             visualAngle.reset(to: angle)
         }
-        // Before the first poll, which reads it.
-        builtInLayout = Layout(displayID: NSScreen.builtIn?.displayID, frame: NSScreen.builtIn?.frame)
+        // Establish the selected displays before the first sensor poll.
+        refreshDisplays()
         setPollInterval(Self.idlePollInterval)
         observeSystemEvents()
         DistributedNotificationCenter.default().addObserver(
@@ -168,14 +162,6 @@ final class LidController: ObservableObject {
             queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.runPreview() }
-        }
-        overlay.warmUp()
-        Task {
-            await snapshotter.warmFilter()
-            // After the overlay has put its presence window up, so the filter
-            // can name this app and leave the overlay out of the picture.
-            try? await Task.sleep(nanoseconds: 500_000_000)
-            await streamer.warmFilter()
         }
     }
 
@@ -187,15 +173,9 @@ final class LidController: ObservableObject {
     }
 
     private func stopEffectAndCapture() {
-        pictureTask?.cancel()
-        pictureTask = nil
-        isCapturePending = false
         isClosingOut = false
         stopDisplayLink()
-        overlay.dismiss(animated: false)
-        snapshotter.stop()
-        streamer.stop()
-        overlay.discardLive()
+        for effect in effects { effect.dismiss(animated: false) }
         preview = nil
         isActive = false
     }
@@ -300,9 +280,7 @@ final class LidController: ObservableObject {
     /// angle for release and keeps a lid held below the angle showing, unless
     /// the timeout ends it first.
     private func wantsEffect(angle: Double) -> Bool {
-        // `builtInLayout` is kept current by the screen change observer, so
-        // this does not enumerate the screens on every sample.
-        guard preferences.isEnabled, builtInLayout.displayID != nil else { return false }
+        guard preferences.isEnabled, !effects.isEmpty else { return false }
         if preferences.isTimeoutEnabled != wasTimeoutEnabled {
             timeoutReferenceAngle = nil
             timeoutAwaitingRelease = false
@@ -366,18 +344,15 @@ final class LidController: ObservableObject {
                 """
                 \(wanted ? "start" : "end", privacy: .public) raw \(angle, format: .fixed(precision: 2)) \
                 predicted \(self.predictedAngle(), format: .fixed(precision: 2)) \
-                velocity \(self.angularVelocity, format: .fixed(precision: 1)) deg/s \
-                snapshot \(self.snapshotter.latestImage != nil)
+                velocity \(self.angularVelocity, format: .fixed(precision: 1)) deg/s
                 """
             )
             setActive(wanted)
             return
         }
         if isActive {
-            if preferences.isLivePicture { streamer.start() }
-            if !overlay.isVisible, !isCapturePending { presentPicture() }
-            // A visible overlay with no link would sit at its first frame.
-            if overlay.isVisible, displayLink == nil { startDisplayLink() }
+            // Each display keeps its own live stream running while active.
+            presentPicture()
         } else if !isClosingOut {
             // The ease back to flat still draws the live picture, and this
             // would free it.
@@ -420,22 +395,13 @@ final class LidController: ObservableObject {
     /// a capture loop running.
     private func updatePrewarm(angle: Double, ceiling: Double) {
         let closingRecently = CACurrentMediaTime() - lastClosingTime < preferences.prewarmLinger
-        guard angle <= ceiling, closingRecently else {
-            snapshotter.endPrewarm()
-            streamer.stop()
-            overlay.discardLive()
-            return
+        for effect in effects {
+            effect.prewarm(
+                isLive: preferences.isLivePicture,
+                shouldCapture: angle <= ceiling && closingRecently,
+                interval: preferences.prewarmInterval
+            )
         }
-        guard preferences.isLivePicture else {
-            streamer.stop()
-            overlay.discardLive()
-            snapshotter.beginPrewarm(interval: preferences.prewarmInterval)
-            return
-        }
-        // Only the stream. Asking ScreenCaptureKit for a screenshot at the
-        // same time makes it serve neither quickly.
-        snapshotter.endPrewarm()
-        streamer.start()
     }
 
     /// A reading can be a full sensor refresh old, so a fast close works from
@@ -468,11 +434,10 @@ final class LidController: ObservableObject {
                 timeoutReferenceTime = startedAt
             }
             visualAngle.reset(to: rawAngle)
-            snapshotter.endPrewarm()
             setPollInterval(Self.activePollInterval)
             presentPicture()
         } else {
-            snapshotter.discard()
+            for effect in effects { effect.endPresentation() }
             timeoutReferenceAngle = nil
             beginClosingOut()
         }
@@ -483,9 +448,9 @@ final class LidController: ObservableObject {
     /// picture. `step(_:)` drives the ease and calls `finishClosingOut()`.
     private func beginClosingOut() {
         // Nothing to ease before the picture is up, or with no link to draw it.
-        guard overlay.isVisible, displayLink != nil else {
+        guard effects.contains(where: { $0.isVisible }), displayLink != nil else {
             stopDisplayLink()
-            overlay.dismiss(animated: true)
+            for effect in effects { effect.dismiss(animated: true) }
             return
         }
         isClosingOut = true
@@ -495,102 +460,24 @@ final class LidController: ObservableObject {
     private func finishClosingOut() {
         isClosingOut = false
         stopDisplayLink()
-        overlay.dismiss(animated: true)
+        for effect in effects { effect.dismiss(animated: true) }
     }
 
     private func endEffect() {
         setActive(false)
     }
 
-    /// Shows the held screenshot, or waits for one. A pre-warm capture that is
-    /// already running counts as that wait.
     private func presentPicture() {
         guard preferences.isEnabled, !isSuspended, isActive else { return }
-        if preferences.isLivePicture, let screen = NSScreen.builtIn,
-           overlay.showLive(
-               on: screen,
-               startAngle: preferences.thresholdAngle,
-               tuning: tuning,
-               fadeIn: Self.fadeInDuration
-           ) {
-            startDisplayLink()
-            if let frame = streamer.newFrame() {
-                Diagnostics.lid.notice("present: live, a stream frame was ready")
-                overlay.absorb(frame)
-                return
-            }
-            // A fast close can reach the trigger angle before the stream has a
-            // frame. One screenshot starts the picture off.
-            if let image = snapshotter.latestImage {
-                Diagnostics.lid.notice("present: live, seeding from the pre-warm screenshot")
-                overlay.seed(image: image)
-                return
-            }
-            Diagnostics.lid.notice("present: live, no picture yet, asking for a screenshot")
-            requestSeed()
-            return
-        }
-
-        if let image = snapshotter.latestImage, let screen = snapshotter.latestScreen {
-            show(image: image, on: screen)
-            return
-        }
-        isCapturePending = true
-        pictureTask?.cancel()
-        pictureTask = Task { [weak self] in
-            guard let self, !Task.isCancelled else { return }
-            await self.snapshotter.captureOnce()
-            guard !Task.isCancelled else { return }
-            self.pictureTask = nil
-            self.isCapturePending = false
-            Diagnostics.lid.notice(
-                """
-                capture landed: image \(self.snapshotter.latestImage != nil) \
-                on \(self.isActive) overlay \(self.overlay.isVisible)
-                """
+        for effect in effects {
+            effect.present(
+                isLive: preferences.isLivePicture,
+                startAngle: preferences.thresholdAngle,
+                tuning: tuning,
+                fadeIn: Self.fadeInDuration
             )
-            guard self.isActive, !self.overlay.isVisible,
-                  let image = self.snapshotter.latestImage,
-                  let screen = self.snapshotter.latestScreen else { return }
-            self.show(image: image, on: screen)
         }
-    }
-
-    /// Takes one screenshot to start a live overlay that has nothing to show
-    /// yet. A stream frame that lands first makes it unnecessary.
-    private func requestSeed() {
-        isCapturePending = true
-        let started = CACurrentMediaTime()
-        pictureTask?.cancel()
-        pictureTask = Task { [weak self] in
-            guard let self, !Task.isCancelled else { return }
-            await self.snapshotter.captureOnce()
-            guard !Task.isCancelled else { return }
-            self.pictureTask = nil
-            self.isCapturePending = false
-            Diagnostics.lid.notice(
-                """
-                seed capture landed after \((CACurrentMediaTime() - started) * 1000, format: .fixed(precision: 0)) ms: \
-                image \(self.snapshotter.latestImage != nil) on \(self.isActive) \
-                ready \(self.overlay.isPictureReady)
-                """
-            )
-            guard self.isActive, !self.overlay.isPictureReady,
-                  let image = self.snapshotter.latestImage else { return }
-            self.overlay.seed(image: image)
-        }
-    }
-
-    private func show(image: CGImage, on screen: NSScreen) {
-        overlay.show(
-            image: image,
-            on: screen,
-            startAngle: preferences.thresholdAngle,
-            tuning: tuning,
-            fadeIn: Self.fadeInDuration
-        )
-        // The link belongs to the overlay window.
-        startDisplayLink()
+        if displayLink == nil { startDisplayLink() }
     }
 
     private func blurProgress(for angle: Double) -> Double {
@@ -602,7 +489,7 @@ final class LidController: ObservableObject {
 
     private func startDisplayLink() {
         stopDisplayLink()
-        guard let window = overlay.hostWindow else {
+        guard let window = effects.compactMap(\.hostWindow).first else {
             Diagnostics.lid.notice("display link skipped, no overlay window")
             return
         }
@@ -623,9 +510,6 @@ final class LidController: ObservableObject {
         let rawInterval = now - lastFrameTime
         let dt = min(max(rawInterval, 1.0 / 240), 1.0 / 20)
         lastFrameTime = now
-        if let frame = streamer.newFrame() {
-            overlay.absorb(frame)
-        }
         let target = isClosingOut ? preferences.thresholdAngle : rawAngle
         visualAngle.advance(to: target, dt: dt)
 
@@ -651,7 +535,9 @@ final class LidController: ObservableObject {
     /// The geometry takes the lid angle itself, so only the blur saturates.
     private func applyVisual(angle: Double) {
         let progress = blurProgress(for: angle)
-        overlay.update(progress: progress, currentAngle: angle, tuning: tuning)
+        for effect in effects {
+            effect.update(progress: progress, angle: angle, tuning: tuning)
+        }
     }
 
     private var tuning: DepthTuning {
@@ -681,26 +567,26 @@ final class LidController: ObservableObject {
             queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated {
-                guard let self else { return }
-                // macOS posts this for backlight and colour changes too.
-                let screen = NSScreen.builtIn
-                let layout = Layout(displayID: screen?.displayID, frame: screen?.frame)
-                guard layout != self.builtInLayout else {
-                    Diagnostics.lid.notice("screen parameters changed, layout unchanged")
-                    return
-                }
-                Diagnostics.lid.notice(
-                    "screen parameters changed, layout now \(String(describing: layout), privacy: .public)"
-                )
-                self.builtInLayout = layout
-                if self.isActive { self.setActive(false) }
-                self.streamer.stop()
-                self.streamer.invalidateFilter()
-                Task { await self.streamer.warmFilter() }
-                self.overlay.discardLive()
-                self.snapshotter.discard()
-                Task { await self.snapshotter.warmFilter() }
+                self?.refreshDisplays()
             }
+        }
+    }
+
+    private func refreshDisplays() {
+        let layouts = DisplayLayout.current(includesExternalDisplays: preferences.includesExternalDisplays)
+        guard layouts != displayLayouts else { return }
+        disableEffect()
+        for effect in effects { effect.dispose() }
+        displayLayouts = layouts
+        effects = layouts.compactMap { layout in
+            guard let screen = NSScreen.screens.first(where: { $0.displayID == layout.displayID }) else { return nil }
+            return DisplayEffect(screen: screen, displayID: layout.displayID)
+        }
+        timeoutReferenceAngle = nil
+        timeoutAwaitingRelease = false
+        Diagnostics.lid.notice("effect displays: \(layouts.map(\.displayID), privacy: .public)")
+        if preferences.isEnabled, !isSuspended {
+            for effect in effects { effect.warmUp() }
         }
     }
 

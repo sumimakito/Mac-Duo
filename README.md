@@ -58,7 +58,8 @@ macOS may require Screen Recording permission again after rebuilding with ad-hoc
 
 - Only MacBooks with a compatible lid angle sensor can use the effect. The app reports when no sensor is available.
 - The sensor must be one macOS marks as built-in. An external display with a similar sensor is ignored.
-- The effect applies only to the built-in display.
+- The effect applies to the built-in display by default. Enable **External displays follow lid** (外置屏幕跟随合盖) in settings to animate each external display’s own contents with the MacBook lid. Live rendering, timeout, and appearance settings apply to every selected display.
+- Connecting, disconnecting, or reconfiguring a selected display ends the current effect. Close the lid again to trigger a fresh run.
 - The effect stops when macOS sleeps as the lid closes.
 - Clicks pass through the effect to the apps underneath.
 

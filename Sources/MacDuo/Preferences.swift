@@ -8,6 +8,7 @@ final class Preferences: ObservableObject {
 
     private enum Key {
         static let isEnabled = "isEnabled"
+        static let includesExternalDisplays = "includesExternalDisplays"
         static let isTimeoutEnabled = "isTimeoutEnabled"
         static let thresholdAngle = "thresholdAngle"
         static let blurSpan = "blurSpan"
@@ -21,7 +22,7 @@ final class Preferences: ObservableObject {
         static let isLivePicture = "isLivePicture"
 
         static let all = [
-            isEnabled, isTimeoutEnabled, thresholdAngle, blurSpan, maxBlurRadius,
+            isEnabled, includesExternalDisplays, isTimeoutEnabled, thresholdAngle, blurSpan, maxBlurRadius,
             maxDim, viewingDistance, recession, blurEvenness, dimReach,
             showsAngleInMenuBar, isLivePicture,
         ]
@@ -29,6 +30,7 @@ final class Preferences: ObservableObject {
 
     private static let factory: [String: Any] = [
         Key.isEnabled: true,
+        Key.includesExternalDisplays: false,
         Key.isTimeoutEnabled: false,
         Key.thresholdAngle: 90.0,
         Key.blurSpan: 60.0,
@@ -45,6 +47,11 @@ final class Preferences: ObservableObject {
     /// Master switch for the depth effect.
     @Published var isEnabled: Bool {
         didSet { defaults.set(isEnabled, forKey: Key.isEnabled) }
+    }
+
+    /// Apply the same lid animation to each external display's own contents.
+    @Published var includesExternalDisplays: Bool {
+        didSet { defaults.set(includesExternalDisplays, forKey: Key.includesExternalDisplays) }
     }
 
     /// Ends the effect early if the angle holds still while below the
@@ -134,15 +141,16 @@ final class Preferences: ObservableObject {
         "blurFrontWidth", "maxTilt", "tiltDegrees", "tiltRatio", "dimEvenness",
     ]
 
-    private let defaults = UserDefaults.standard
+    private let defaults: UserDefaults
 
     // No inline values on purpose. Swift skips property observers for the
     // assignment that initialises a property.
-    private init() {
-        let defaults = UserDefaults.standard
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
         defaults.register(defaults: Self.factory)
         for key in Self.retired { defaults.removeObject(forKey: key) }
         isEnabled = defaults.bool(forKey: Key.isEnabled)
+        includesExternalDisplays = defaults.bool(forKey: Key.includesExternalDisplays)
         isTimeoutEnabled = defaults.bool(forKey: Key.isTimeoutEnabled)
         thresholdAngle = defaults.double(forKey: Key.thresholdAngle)
         blurSpan = defaults.double(forKey: Key.blurSpan)
@@ -161,6 +169,7 @@ final class Preferences: ObservableObject {
             defaults.removeObject(forKey: key)
         }
         isEnabled = defaults.bool(forKey: Key.isEnabled)
+        includesExternalDisplays = defaults.bool(forKey: Key.includesExternalDisplays)
         isTimeoutEnabled = defaults.bool(forKey: Key.isTimeoutEnabled)
         thresholdAngle = defaults.double(forKey: Key.thresholdAngle)
         blurSpan = defaults.double(forKey: Key.blurSpan)

@@ -36,3 +36,5 @@
 "Language" = "Language";
 "System" = "System";
 "Chinese (Simplified)" = "Chinese (Simplified)";
+"External displays follow lid" = "External displays follow lid";
+"Applies the effect to each external display as the MacBook lid closes." = "Applies the effect to each external display as the MacBook lid closes.";

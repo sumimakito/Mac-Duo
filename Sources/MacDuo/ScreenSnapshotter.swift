@@ -17,7 +17,7 @@ extension NSScreen {
     }
 }
 
-/// Keeps a recent screenshot of the built-in display ready.
+/// Keeps a recent screenshot of one display ready.
 ///
 /// Building an `SCContentFilter` enumerates every on-screen window, so the
 /// filter is cached and rebuilt only when the display changes.
@@ -26,6 +26,16 @@ final class ScreenSnapshotter {
 
     private(set) var latestImage: CGImage?
     private(set) var latestScreen: NSScreen?
+
+    private let displayID: CGDirectDisplayID
+
+    init(displayID: CGDirectDisplayID) {
+        self.displayID = displayID
+    }
+
+    private var targetScreen: NSScreen? {
+        NSScreen.screens.first { $0.displayID == displayID }
+    }
 
     private var filter: SCContentFilter?
     private var filterDisplayID: CGDirectDisplayID?
@@ -72,7 +82,7 @@ final class ScreenSnapshotter {
 
     /// Builds the capture filter without taking a screenshot.
     func warmFilter() async {
-        guard let screen = NSScreen.builtIn, let displayID = screen.displayID else { return }
+        guard targetScreen != nil else { return }
         if filter == nil || filterDisplayID != displayID {
             await rebuildFilter(displayID: displayID)
         }
@@ -96,7 +106,7 @@ final class ScreenSnapshotter {
 
     private func performCapture() async {
         guard !Task.isCancelled else { return }
-        guard let screen = NSScreen.builtIn, let displayID = screen.displayID else { return }
+        guard let screen = targetScreen else { return }
         if filter == nil || filterDisplayID != displayID {
             await rebuildFilter(displayID: displayID)
         }

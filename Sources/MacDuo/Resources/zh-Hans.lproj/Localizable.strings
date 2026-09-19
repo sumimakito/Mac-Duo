@@ -36,3 +36,5 @@
 "Language" = "语言";
 "System" = "跟随系统";
 "Chinese (Simplified)" = "简体中文";
+"External displays follow lid" = "外置屏幕跟随合盖";
+"Applies the effect to each external display as the MacBook lid closes." = "合上 MacBook 屏幕时，外置屏幕也会对各自的画面应用效果。";
