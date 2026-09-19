@@ -64,6 +64,7 @@ final class DepthRenderer {
     /// frame that arrives first wins, since it is the newer of the two.
     private var pendingSeed: (buffer: MTLBuffer, width: Int, height: Int)?
     private static var hasReportedPyramidFailure = false
+    private static var hasReportedPyramidFallback = false
     /// Built once, re-encoded every frame.
     private lazy var livePyramid = MPSImageGaussianPyramid(device: device, centerWeight: 0.375)
 
@@ -113,6 +114,40 @@ final class DepthRenderer {
         // link already paces the drawing.
         target.displaySyncEnabled = false
         target.needsDisplayOnBoundsChange = true
+    }
+
+    /// The outcome of building the mip chain under a picture.
+    private enum PyramidResult {
+        /// The MPS Gaussian pyramid encoded as before.
+        case mps
+        /// MPS could not run on this GPU; the blit encoder's mipmaps stand in.
+        case blitFallback
+        /// Neither path worked; the chain above level 0 is unusable.
+        case failed
+    }
+
+    /// Builds the mip chain in place. MPS is the fast path, but its encode
+    /// can fail on some GPUs (reported on Intel, where the frosted glass
+    /// came out black while the lid angle kept working). When that happens
+    /// the blit encoder's box-filter mipmaps stand in: coarser than a true
+    /// Gaussian, but every level the shader samples stays valid instead of
+    /// black.
+    nonisolated private static func buildPyramid(
+        _ pyramid: MPSUnaryImageKernel,
+        into texture: inout MTLTexture,
+        on commands: MTLCommandBuffer
+    ) -> PyramidResult {
+        if pyramid.encode(
+            commandBuffer: commands,
+            inPlaceTexture: &texture,
+            fallbackCopyAllocator: nil
+        ) {
+            return .mps
+        }
+        guard let blit = commands.makeBlitCommandEncoder() else { return .failed }
+        blit.generateMipmaps(for: texture)
+        blit.endEncoding()
+        return .blitFallback
     }
 
     /// Puts the picture on a black margin, uploads it, and builds the pyramid.
@@ -184,8 +219,21 @@ final class DepthRenderer {
         )
         blit.endEncoding()
 
-        MPSImageGaussianPyramid(device: device, centerWeight: 0.375)
-            .encode(commandBuffer: commands, inPlaceTexture: &texture, fallbackCopyAllocator: nil)
+        switch Self.buildPyramid(
+            MPSImageGaussianPyramid(device: device, centerWeight: 0.375),
+            into: &texture,
+            on: commands
+        ) {
+        case .mps:
+            break
+        case .blitFallback:
+            Diagnostics.geometry.notice(
+                "MPS pyramid encode failed on this GPU; picture uses blit mipmaps"
+            )
+        case .failed:
+            Diagnostics.geometry.error("could not build the mip chain for the picture")
+            return nil
+        }
         commands.commit()
         commands.waitUntilCompleted()
         let finished = CFAbsoluteTimeGetCurrent()
@@ -340,14 +388,24 @@ final class DepthRenderer {
         pendingFrame = nil
         pendingSeed = nil
         blit.endEncoding()
-        let built = livePyramid.encode(
-            commandBuffer: commands,
-            inPlaceTexture: &target,
-            fallbackCopyAllocator: nil
-        )
-        if !built, !Self.hasReportedPyramidFailure {
-            Self.hasReportedPyramidFailure = true
-            Diagnostics.geometry.error("live pyramid in place encode returned false")
+        let built = Self.buildPyramid(livePyramid, into: &target, on: commands)
+        switch built {
+        case .mps:
+            break
+        case .blitFallback:
+            if !Self.hasReportedPyramidFallback {
+                Self.hasReportedPyramidFallback = true
+                Diagnostics.geometry.notice(
+                    "live pyramid: MPS encode failed on this GPU; using blit mipmaps"
+                )
+            }
+        case .failed:
+            if !Self.hasReportedPyramidFailure {
+                Self.hasReportedPyramidFailure = true
+                Diagnostics.geometry.error(
+                    "live pyramid failed on both MPS and the blit fallback"
+                )
+            }
         }
         liveTexture = target
         texture = target
