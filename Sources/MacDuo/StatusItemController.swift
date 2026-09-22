@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 
 /// The menu bar item and the settings popover.
@@ -9,7 +10,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     private let popover = NSPopover()
     private let preferences: Preferences
     private let controller: LidController
-    private var titleTimer: Timer?
+    private var titleSubscription: AnyCancellable?
     private var barWindowMoved: NSObjectProtocol?
 
     init(controller: LidController, preferences: Preferences) {
@@ -43,17 +44,18 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         hostingController.sizingOptions = [.preferredContentSize]
         popover.contentViewController = hostingController
 
-        let timer = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.refreshTitle() }
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        titleTimer = timer
-        refreshTitle()
+        // Only when the angle or the setting changes, never on a timer.
+        titleSubscription = controller.$currentAngle
+            .map { $0.rounded() }
+            .removeDuplicates()
+            .combineLatest(preferences.$showsAngleInMenuBar.removeDuplicates())
+            .sink { [weak self] angle, shows in
+                self?.setTitle(angle: angle, shows: shows)
+            }
         watchBarWindow()
     }
 
     deinit {
-        titleTimer?.invalidate()
         if let barWindowMoved {
             NotificationCenter.default.removeObserver(barWindowMoved)
         }
@@ -99,12 +101,21 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         popover.show(relativeTo: .zero, of: button, preferredEdge: .minY)
     }
 
-    private func refreshTitle() {
+    private func setTitle(angle: Double, shows: Bool) {
         guard let button = statusItem.button else { return }
-        if preferences.showsAngleInMenuBar {
-            button.title = String(format: " %.0f°", controller.currentAngle)
+        if shows {
+            button.title = String(format: " %.0f°", angle)
         } else if !button.title.isEmpty {
             button.title = ""
         }
+    }
+
+    // The panel shows the live angle, which needs the sensor polled.
+    func popoverWillShow(_ notification: Notification) {
+        controller.isPanelOpen = true
+    }
+
+    func popoverDidClose(_ notification: Notification) {
+        controller.isPanelOpen = false
     }
 }
