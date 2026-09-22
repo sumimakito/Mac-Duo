@@ -42,7 +42,7 @@ struct SettingsView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 10) {
                         switches
-                        if !hasScreenPermission {
+                        if !hasScreenPermission, !preferences.usesWindowServer {
                             permissionNotice
                         }
                         startGroup
@@ -97,11 +97,17 @@ struct SettingsView: View {
                 help: localized("Leans the screen away as the lid closes.")
             )
             toggleRow(
+                localized("No Screen Recording"),
+                isOn: $preferences.usesWindowServer,
+                help: localized("macOS itself leans, stretches and blurs the live screen. Off captures the screen instead, which needs Screen Recording and more power.")
+            )
+            .disabled(!preferences.isEnabled)
+            toggleRow(
                 localized("Live rendering"),
                 isOn: $preferences.isLivePicture,
                 help: localized("Off holds the frame from when the effect started.")
             )
-            .disabled(!preferences.isEnabled)
+            .disabled(!preferences.isEnabled || preferences.usesWindowServer)
         }
     }
 
@@ -155,6 +161,8 @@ struct SettingsView: View {
                 help: localized("0 keeps the sides parallel, 100 converges sharply.")
             )
         }
+        // The window server fold has its own geometry.
+        .disabled(!preferences.isEnabled || preferences.usesWindowServer)
     }
 
     private var appGroup: some View {

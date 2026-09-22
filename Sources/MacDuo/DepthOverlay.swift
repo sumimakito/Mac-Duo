@@ -9,52 +9,6 @@ final class OverlayWindow: NSWindow {
     override var canBecomeMain: Bool { false }
 }
 
-/// Where the picture lands on the glass.
-///
-/// The picture is a sheet hinged to the bottom edge of the screen, turned back
-/// in world space by the angle the lid has travelled. The eye stays where it
-/// is while the glass turns under it, so the projection takes both the current
-/// lid angle and the eye position.
-struct DepthGeometry {
-
-    /// Past 90 degrees the picture turns its face away from the glass.
-    var maxSeparationDegrees: Double = 88
-
-    /// Bottom-left, bottom-right, top-right, top-left.
-    func corners(
-        startAngle: Double,
-        currentAngle: Double,
-        viewingDistanceRatio: Double,
-        recession: Double,
-        screenSize: CGSize
-    ) -> [CGPoint] {
-        let width = Double(screenSize.width)
-        let height = Double(screenSize.height)
-        let start = startAngle * .pi / 180
-        let current = currentAngle * .pi / 180
-        let travel = max(startAngle - currentAngle, 0)
-        let separation = min(recession * travel, maxSeparationDegrees) * .pi / 180
-
-        // The eye in world axes, hinge at the origin.
-        let reach = height * viewingDistanceRatio + height / 2 * cos(start)
-        let rise = height / 2 * sin(start)
-
-        // The same eye, measured along the glass and away from it.
-        let along = reach * cos(current) + rise * sin(current)
-        let depth = max(reach * sin(current) - rise * cos(current), height / 10)
-
-        let half = width / 2
-        func project(_ x: Double, _ y: Double) -> CGPoint {
-            let scale = depth / (depth + y * sin(separation))
-            return CGPoint(
-                x: half + (x - half) * scale,
-                y: along + (y * cos(separation) - along) * scale
-            )
-        }
-        return [project(0, 0), project(width, 0), project(width, height), project(0, height)]
-    }
-}
-
 /// The settings that shape one frame.
 struct DepthTuning {
     var viewingDistance: Double = 2.7
@@ -63,6 +17,8 @@ struct DepthTuning {
     var dimReach: Double = 0.7
     var maxBlurRadius: Double = 55
     var maxDim: Double = 0.4
+    /// Degrees of closing after which the far edge reaches `maxBlurRadius`.
+    var blurSpan: Double = 60
 }
 
 private final class MetalHostView: NSView {
@@ -96,6 +52,8 @@ final class DepthOverlay {
     private var presenceWindow: OverlayWindow?
     /// Built once and kept.
     private var renderer: DepthRenderer?
+    /// Set while the window server does the blur instead of the renderer.
+    private var backdropView: BackdropPortalView?
     private var hasTriedToBuildRenderer = false
     private var buildToken = 0
     private let buildQueue = DispatchQueue(label: "MacDuo.pictureUpload", qos: .userInteractive)
@@ -106,10 +64,12 @@ final class DepthOverlay {
     private var gradient = BlurGradient()
     private var tuning = DepthTuning()
     private var fadeIn: TimeInterval = 0.07
+    /// Largest fold the window server stretch follows, in radians.
+    private static let maxFold = 84.0 * .pi / 180
     private var hasRevealed = false
 
     var isVisible: Bool { window != nil }
-    var isPictureReady: Bool { renderer?.isReady ?? false }
+    var isPictureReady: Bool { backdropView != nil || (renderer?.isReady ?? false) }
     var hostWindow: NSWindow? { window }
 
     @discardableResult
@@ -188,6 +148,38 @@ final class DepthOverlay {
         renderer?.discardLive()
     }
 
+    /// Puts up a window through which the window server leans, blurs and dims
+    /// whatever is behind it. Nothing is captured.
+    @discardableResult
+    func showBackdrop(
+        on screen: NSScreen,
+        startAngle: Double,
+        tuning: DepthTuning,
+        fadeIn: TimeInterval
+    ) -> Bool {
+        dismiss(animated: false)
+        guard BackdropPortalView.isSupported else { return false }
+        self.startAngle = startAngle
+        self.tuning = tuning
+        self.fadeIn = fadeIn
+        screenSize = screen.frame.size
+        buildToken += 1
+        let view = BackdropPortalView(
+            frame: NSRect(origin: .zero, size: screenSize),
+            scale: screen.backingScaleFactor
+        )
+        view.autoresizingMask = [.width, .height]
+        backdropView = view
+        makeWindow(on: screen, contentView: view)
+        guard window != nil else {
+            backdropView = nil
+            return false
+        }
+        update(progress: 0, currentAngle: startAngle, tuning: tuning)
+        reveal()
+        return true
+    }
+
 
     func show(
         image: CGImage,
@@ -236,7 +228,10 @@ final class DepthOverlay {
         let view = MetalHostView(layer: renderer.makeLayer(), scale: CGFloat(pixelScale))
         view.frame = NSRect(origin: .zero, size: screenSize)
         view.autoresizingMask = [.width, .height]
+        makeWindow(on: screen, contentView: view)
+    }
 
+    private func makeWindow(on screen: NSScreen, contentView view: NSView) {
         let window = OverlayWindow(
             contentRect: screen.frame,
             styleMask: .borderless,
@@ -261,7 +256,7 @@ final class DepthOverlay {
     /// Fades the window in once, and only once the picture has something to
     /// draw.
     private func reveal() {
-        guard let window, !hasRevealed, renderer?.isReady == true else { return }
+        guard let window, !hasRevealed, isPictureReady else { return }
         hasRevealed = true
         NSAnimationContext.runAnimationGroup { context in
             context.duration = fadeIn
@@ -271,9 +266,47 @@ final class DepthOverlay {
     }
 
     func update(progress: Double, currentAngle: Double, tuning: DepthTuning) {
-        guard let renderer, renderer.isReady else { return }
         self.tuning = tuning
+        // The screen stays where the glass started and the glass, frosted,
+        // turns away from it by the whole of the lid's travel. The gap between
+        // them sets the blur, whatever the picture's lean.
+        let separation = geometry.separation(
+            startAngle: startAngle,
+            currentAngle: currentAngle,
+            recession: 1
+        )
+        // How far the top edge sits behind the glass once the lid has closed
+        // by `blurSpan`. A gap that size blurs by the full radius.
+        let fullGap = Double(screenSize.height) * sin(geometry.separation(
+            startAngle: tuning.blurSpan,
+            currentAngle: 0,
+            recession: 1
+        ))
+        if let backdropView {
+            // The glass folds away from the flat screen by the lid's travel,
+            // so the screen is drawn out by 1 / cos of it. Past this the
+            // stretch runs away as the lid shuts.
+            let fold = min(separation, Self.maxFold)
+            let farGap = fullGap > 1
+                ? min(Double(screenSize.height) * sin(separation) / fullGap, DepthRenderer.maxGapFraction)
+                : 0
+            let hingeBlur = tuning.blurEvenness * gradient.blurStrength(progress: progress)
+            let farBlur = hingeBlur + (1 - tuning.blurEvenness) * farGap
+            backdropView.apply(
+                stretch: 1 / cos(fold),
+                blurRadius: farBlur * tuning.maxBlurRadius,
+                hingeBlur: hingeBlur * tuning.maxBlurRadius,
+                dimStrength: gradient.dimStrength(progress: progress),
+                dimHingeFloor: gradient.dimHingeFloor,
+                dimReach: tuning.dimReach,
+                maxDim: tuning.maxDim
+            )
+            return
+        }
+        guard let renderer, renderer.isReady else { return }
         renderer.render(
+            separation: separation,
+            fullBlurGap: fullGap,
             corners: geometry.corners(
                 startAngle: startAngle,
                 currentAngle: currentAngle,
@@ -297,6 +330,7 @@ final class DepthOverlay {
         self.window = nil
         buildToken += 1
         renderer?.release()
+        backdropView = nil
 
         guard animated else {
             window.orderOut(nil)

@@ -6,6 +6,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var controller: LidController?
     private var statusItemController: StatusItemController?
+    /// `kill` and the like skip `applicationWillTerminate`, which puts the lid
+    /// sensor's report interval back. These route them through it.
+    private var signalSources: [DispatchSourceSignal] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Diagnostics.geometry.notice("launched, screen recording granted: \(CGPreflightScreenCaptureAccess())")
@@ -14,6 +17,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.controller = controller
         statusItemController = StatusItemController(controller: controller, preferences: preferences)
         controller.start()
+        for number in [SIGTERM, SIGINT, SIGHUP] {
+            signal(number, SIG_IGN)
+            let source = DispatchSource.makeSignalSource(signal: number, queue: .main)
+            source.setEventHandler { NSApp.terminate(nil) }
+            source.resume()
+            signalSources.append(source)
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {

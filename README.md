@@ -19,9 +19,10 @@ Mac Duo adds this effect to your MacBook, with controls in the menu bar.
 
 With the default settings, it's recommended to view the effect in front of your MacBook.
 
-- **Metal rendering:** Uses GPU rendering to apply perspective, blur, and dimming as the lid closes.
-- **Live screen content:** Uses ScreenCaptureKit to capture and render screen content in real time.
-- **Adjustable perspective:** Tweak the perspective to suit your viewing position and make the effect look more natural.
+- **Window server rendering:** By default the macOS window server folds the live screen itself, the way the iPhone Fold does: the screen stays flat while the glass folds away, so content is drawn out from the hinge, softens and darkens toward the far edge. Nothing is captured, so no Screen Recording permission is needed.
+- **Low power:** The lid sensor pushes its readings, so the app sleeps until the lid moves. Idle CPU use is around 0.03%.
+- **Metal rendering:** Turn off "No Screen Recording" to capture the screen with ScreenCaptureKit and render it with Metal instead.
+- **Adjustable perspective:** Tweak the lean and perspective to suit your viewing position.
 
 
 > [!NOTE]
@@ -36,7 +37,7 @@ With the default settings, it's recommended to view the effect in front of your 
 These downloads contain the latest [development build](https://github.com/sumimakito/Mac-Duo/releases/tag/dev) for Apple Silicon and Intel Macs.
 
 Requires macOS 14 or later and a MacBook with a compatible lid angle sensor.
-Grant Screen Recording permission when prompted to enable the effect.
+Screen Recording permission is only needed if you turn off "No Screen Recording".
 
 ## Build
 
