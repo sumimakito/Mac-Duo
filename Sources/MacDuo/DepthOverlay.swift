@@ -54,6 +54,10 @@ final class DepthOverlay {
     private var renderer: DepthRenderer?
     /// Set while the window server does the blur instead of the renderer.
     private var backdropView: BackdropPortalView?
+    /// The window server overlay, built ahead of time and kept, so a close
+    /// shows it on the next frame instead of waiting on a new window.
+    private var portalWindow: OverlayWindow?
+    private var portalView: BackdropPortalView?
     private var hasTriedToBuildRenderer = false
     private var buildToken = 0
     private let buildQueue = DispatchQueue(label: "MacDuo.pictureUpload", qos: .userInteractive)
@@ -64,8 +68,9 @@ final class DepthOverlay {
     private var gradient = BlurGradient()
     private var tuning = DepthTuning()
     private var fadeIn: TimeInterval = 0.07
-    /// Largest fold the window server stretch follows, in radians.
-    private static let maxFold = 84.0 * .pi / 180
+    /// The blur setting that makes the window server glass as frosted as
+    /// tracing paper.
+    private static let tracingPaperBlur = 100.0
     private var hasRevealed = false
 
     var isVisible: Bool { window != nil }
@@ -158,28 +163,46 @@ final class DepthOverlay {
         fadeIn: TimeInterval
     ) -> Bool {
         dismiss(animated: false)
-        guard BackdropPortalView.isSupported else { return false }
+        preparePortal(on: screen)
+        guard let portalWindow, let portalView else { return false }
         self.startAngle = startAngle
         self.tuning = tuning
         self.fadeIn = fadeIn
         screenSize = screen.frame.size
         buildToken += 1
-        let view = BackdropPortalView(
-            frame: NSRect(origin: .zero, size: screenSize),
-            scale: screen.backingScaleFactor
-        )
-        view.autoresizingMask = [.width, .height]
-        backdropView = view
-        makeWindow(on: screen, contentView: view)
-        guard window != nil else {
-            backdropView = nil
-            return false
-        }
+        backdropView = portalView
+        window = portalWindow
+        // Flat, it is the screen itself, so it shows at once with no fade.
         update(progress: 0, currentAngle: startAngle, tuning: tuning)
-        reveal()
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0
+            portalWindow.animator().alphaValue = 1
+        }
+        portalWindow.alphaValue = 1
+        portalWindow.orderFrontRegardless()
+        hasRevealed = true
         return true
     }
 
+    /// Builds the window server overlay for `screen`, hidden, unless one for
+    /// that frame is already waiting. Costs a few layers and no drawing.
+    func preparePortal(on screen: NSScreen) {
+        guard BackdropPortalView.isSupported else { return }
+        if let portalWindow, portalWindow.frame == screen.frame { return }
+        if let old = portalWindow {
+            if window === old { window = nil }
+            if fadingWindow === old { fadingWindow = nil }
+            old.orderOut(nil)
+            old.close()
+        }
+        let view = BackdropPortalView(
+            frame: NSRect(origin: .zero, size: screen.frame.size),
+            scale: screen.backingScaleFactor
+        )
+        view.autoresizingMask = [.width, .height]
+        portalView = view
+        portalWindow = makeOverlayWindow(on: screen, contentView: view)
+    }
 
     func show(
         image: CGImage,
@@ -232,6 +255,14 @@ final class DepthOverlay {
     }
 
     private func makeWindow(on screen: NSScreen, contentView view: NSView) {
+        let window = makeOverlayWindow(on: screen, contentView: view)
+        window.alphaValue = 0
+        window.orderFrontRegardless()
+        hasRevealed = false
+        self.window = window
+    }
+
+    private func makeOverlayWindow(on screen: NSScreen, contentView view: NSView) -> OverlayWindow {
         let window = OverlayWindow(
             contentRect: screen.frame,
             styleMask: .borderless,
@@ -245,12 +276,12 @@ final class DepthOverlay {
         window.ignoresMouseEvents = true
         window.isReleasedWhenClosed = false
         window.level = NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()))
-        window.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
+        // On every space, full screen ones too, and floating above them while
+        // they slide. `.stationary` would tie it to the desktop, which slides
+        // away with its space when swiping between spaces.
+        window.collectionBehavior = [.canJoinAllSpaces, .transient, .fullScreenAuxiliary, .ignoresCycle]
         window.setFrame(screen.frame, display: false)
-        window.alphaValue = 0
-        window.orderFrontRegardless()
-        hasRevealed = false
-        self.window = window
+        return window
     }
 
     /// Fades the window in once, and only once the picture has something to
@@ -283,23 +314,12 @@ final class DepthOverlay {
             recession: 1
         ))
         if let backdropView {
-            // The glass folds away from the flat screen by the lid's travel,
-            // so the screen is drawn out by 1 / cos of it. Past this the
-            // stretch runs away as the lid shuts.
-            let fold = min(separation, Self.maxFold)
-            let farGap = fullGap > 1
-                ? min(Double(screenSize.height) * sin(separation) / fullGap, DepthRenderer.maxGapFraction)
-                : 0
-            let hingeBlur = tuning.blurEvenness * gradient.blurStrength(progress: progress)
-            let farBlur = hingeBlur + (1 - tuning.blurEvenness) * farGap
+            // A frosted sheet lifted off the screen it left. The blur setting
+            // scales how frosted it is; its factory value is tracing paper.
             backdropView.apply(
-                stretch: 1 / cos(fold),
-                blurRadius: farBlur * tuning.maxBlurRadius,
-                hingeBlur: hingeBlur * tuning.maxBlurRadius,
-                dimStrength: gradient.dimStrength(progress: progress),
-                dimHingeFloor: gradient.dimHingeFloor,
-                dimReach: tuning.dimReach,
-                maxDim: tuning.maxDim
+                lift: separation,
+                frost: tuning.maxBlurRadius / Self.tracingPaperBlur,
+                darkness: tuning.maxDim
             )
             return
         }
@@ -334,7 +354,7 @@ final class DepthOverlay {
 
         guard animated else {
             window.orderOut(nil)
-            window.close()
+            if window !== portalWindow { window.close() }
             return
         }
 
@@ -345,9 +365,11 @@ final class DepthOverlay {
             window.animator().alphaValue = 0
         } completionHandler: { [weak self] in
             MainActor.assumeIsolated {
-                if let self, self.fadingWindow === window { self.fadingWindow = nil }
+                // A new run may have taken the window back over meanwhile.
+                guard let self, self.fadingWindow === window else { return }
+                self.fadingWindow = nil
                 window.orderOut(nil)
-                window.close()
+                if window !== self.portalWindow { window.close() }
             }
         }
     }
@@ -357,6 +379,6 @@ final class DepthOverlay {
         guard let fadingWindow else { return }
         self.fadingWindow = nil
         fadingWindow.orderOut(nil)
-        fadingWindow.close()
+        if fadingWindow !== portalWindow { fadingWindow.close() }
     }
 }

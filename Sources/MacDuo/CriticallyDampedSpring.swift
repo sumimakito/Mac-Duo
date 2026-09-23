@@ -12,8 +12,9 @@ struct CriticallyDampedSpring {
     /// Radians per second. Higher follows the target faster and smooths less.
     var frequency: Double = 16
 
-    init(value: Double = 0) {
+    init(value: Double = 0, frequency: Double = 16) {
         self.value = value
+        self.frequency = frequency
     }
 
     mutating func advance(to target: Double, dt: Double) {

@@ -21,6 +21,7 @@ private final class WakeGate: @unchecked Sendable {
     private let lock = NSLock()
     /// The precise angle when the controller went to sleep; `nil` while awake.
     private var sleepingAt: Double?
+    private var lastPush: (degrees: Double, time: CFTimeInterval)?
 
     func sleep(at angle: Double) {
         lock.lock(); defer { lock.unlock() }
@@ -32,13 +33,18 @@ private final class WakeGate: @unchecked Sendable {
         sleepingAt = nil
     }
 
-    /// True once per sleep, for the first reading `margin` away from where the
-    /// lid rested.
-    func shouldWake(for degrees: Double, margin: Double) -> Bool {
+    /// The lid's speed from this push and the one before, in degrees per
+    /// second, once per sleep, for the first reading `margin` away from where
+    /// the lid rested; `nil` for readings not worth waking for. The speed lets
+    /// the controller act on the very first poll instead of waiting for two.
+    func wakeSpeed(for degrees: Double, at time: CFTimeInterval, margin: Double) -> Double? {
         lock.lock(); defer { lock.unlock() }
-        guard let sleepingAt, abs(degrees - sleepingAt) >= margin else { return false }
+        let previous = lastPush
+        lastPush = (degrees, time)
+        guard let sleepingAt, abs(degrees - sleepingAt) >= margin else { return nil }
         self.sleepingAt = nil
-        return true
+        guard let previous, time - previous.time > 0.02, time - previous.time < 0.6 else { return 0 }
+        return (degrees - previous.degrees) / (time - previous.time)
     }
 }
 
@@ -76,7 +82,9 @@ final class LidController: ObservableObject {
     private var lastChangedAngle: Double?
     private var lastChangeTime: CFTimeInterval = 0
     private var lastClosingTime: CFTimeInterval = -.greatestFiniteMagnitude
-    private var visualAngle = CriticallyDampedSpring()
+    /// Quick enough to keep up with a fast close; the prediction it follows
+    /// covers the sensor's own lag.
+    private var visualAngle = CriticallyDampedSpring(value: 0, frequency: 24)
     private var consecutiveFailedReads = 0
     private var startedAt: CFTimeInterval = 0
     private var preview: PreviewRun?
@@ -114,9 +122,19 @@ final class LidController: ObservableObject {
 
     /// Polling rate for sensors that cannot push.
     private static let idlePollInterval: TimeInterval = 1.0 / 8
-    /// How often a still lid's sensor pushes a reading. Each costs about 8 µs
-    /// of CPU on a utility queue, and the main thread stays asleep.
-    private static let idlePushInterval: TimeInterval = 0.25
+    /// How often a still lid's sensor pushes a reading near the start angle,
+    /// where a close has to be caught at once: the sensor's own refresh. Each
+    /// reading costs about 80 µs of CPU on a utility queue, and the main
+    /// thread stays asleep.
+    private static let nearPushInterval: TimeInterval = 0.1
+    /// Further open, a close takes long enough to reach the start angle that
+    /// a slower watch still catches it in time.
+    private static let farPushInterval: TimeInterval = 0.5
+    /// Degrees above the start angle that count as near.
+    private static let nearMargin: Double = 30
+    /// Typical age of a pushed reading: half a sensor refresh.
+    private static let pushAge: TimeInterval = 0.05
+    private var pushInterval: TimeInterval = 0
     /// Pushed readings are whole degrees, and a lid resting between two of
     /// them flickers by one. This much away from the resting angle wakes.
     private static let wakeMargin: Double = 1.5
@@ -215,6 +233,10 @@ final class LidController: ObservableObject {
                 guard let self else { return }
                 self.stopEffectAndCapture()
                 if !usesWindowServer, self.isSensorAvailable { self.warmCapture() }
+                // The setting changes after this runs.
+                if usesWindowServer {
+                    DispatchQueue.main.async { MainActor.assumeIsolated { self.preparePortal() } }
+                }
             }
     }
 
@@ -233,10 +255,11 @@ final class LidController: ObservableObject {
         builtInLayout = Layout(displayID: NSScreen.builtIn?.displayID, frame: NSScreen.builtIn?.frame)
         let gate = wakeGate
         let margin = Self.wakeMargin
-        isPushing = sensor.startReporting(interval: Self.idlePushInterval, queue: pushQueue) { [weak self] degrees in
-            guard gate.shouldWake(for: degrees, margin: margin) else { return }
+        pushInterval = Self.nearPushInterval
+        isPushing = sensor.startReporting(interval: pushInterval, queue: pushQueue) { [weak self] degrees in
+            guard let speed = gate.wakeSpeed(for: degrees, at: CACurrentMediaTime(), margin: margin) else { return }
             DispatchQueue.main.async {
-                MainActor.assumeIsolated { self?.wake() }
+                MainActor.assumeIsolated { self?.wakeFromPush(speed: speed) }
             }
         }
         Diagnostics.lid.notice("sensor pushes readings: \(self.isPushing)")
@@ -252,6 +275,7 @@ final class LidController: ObservableObject {
         // The window server blur captures nothing, so it never touches
         // ScreenCaptureKit and never asks for Screen Recording.
         if !preferences.usesWindowServer { warmCapture() }
+        preparePortal()
     }
 
     private func warmCapture() {
@@ -263,6 +287,12 @@ final class LidController: ObservableObject {
             try? await Task.sleep(nanoseconds: 500_000_000)
             await streamer.warmFilter()
         }
+    }
+
+    /// Has the window server overlay built and waiting, hidden.
+    private func preparePortal() {
+        guard !capturesScreen, let screen = NSScreen.builtIn else { return }
+        overlay.preparePortal(on: screen)
     }
 
     private var capturesScreen: Bool {
@@ -335,6 +365,30 @@ final class LidController: ObservableObject {
         pollTimer = timer
     }
 
+    /// A pushed reading has moved away from where the lid rested. Reads the
+    /// precise angle at once rather than a poll interval later, starting from
+    /// the speed the pushes measured, so a close past the start angle is acted
+    /// on at this very reading.
+    private func wakeFromPush(speed: Double) {
+        guard !isSuspended else { return }
+        let now = CACurrentMediaTime()
+        if abs(speed) > abs(angularVelocity) {
+            angularVelocity = speed
+            motionIntent.update(
+                angularVelocity: speed,
+                at: now,
+                closingSpeed: Self.triggerClosingSpeed,
+                openingSpeed: Self.triggerOpeningSpeed
+            )
+        }
+        // A fresh baseline: the reading before sleep is too old to measure
+        // speed against, and a push is at most one sensor refresh old.
+        lastChangedAngle = nil
+        lastChangeTime = now - Self.pushAge
+        wake()
+        poll()
+    }
+
     /// Starts polling, from sleep or not. A pushed reading away from the
     /// resting angle calls this, and so does anything that needs fresh angles.
     private func wake() {
@@ -353,6 +407,13 @@ final class LidController: ObservableObject {
         // back up through `reconcile`.
         stopDisplayLink()
         wakeGate.sleep(at: angle)
+        let interval = angle <= preferences.thresholdAngle + Self.nearMargin
+            ? Self.nearPushInterval
+            : Self.farPushInterval
+        if interval != pushInterval {
+            pushInterval = interval
+            sensor.setReportInterval(interval)
+        }
     }
 
     /// Whether anything still needs a fresh angle every frame.
@@ -374,6 +435,12 @@ final class LidController: ObservableObject {
             guard let scripted = run.angle(at: CACurrentMediaTime()) else {
                 preview = nil
                 peakAngle = 0
+                // The next reading is the real lid, and the jump to it from
+                // the sweep's last angle would read as a fast close.
+                lastChangedAngle = nil
+                angularVelocity = 0
+                recentAngles.removeAll()
+                motionIntent.reset()
                 if isActive { setActive(false) }
                 return
             }
@@ -614,9 +681,9 @@ final class LidController: ObservableObject {
                 timeoutReferenceAngle = rawAngle
                 timeoutReferenceTime = startedAt
             }
-            // From flat, so a start noticed a little late eases in rather than
-            // jumping straight to a blurred picture.
-            visualAngle.reset(to: max(rawAngle, preferences.thresholdAngle))
+            // Straight to where the lid is: a start noticed late shows the
+            // blur the lid has already reached rather than easing into it.
+            visualAngle.reset(to: rawAngle)
             snapshotter.endPrewarm()
             wake()
             presentPicture()
@@ -785,7 +852,9 @@ final class LidController: ObservableObject {
         if streamer.isStarted, let frame = streamer.newFrame() {
             overlay.absorb(frame)
         }
-        let target = isClosingOut ? preferences.thresholdAngle : rawAngle
+        // Where the lid is heading, not the last reading, while it closes
+        // fast: a reading can be a sensor refresh old.
+        let target = isClosingOut ? preferences.thresholdAngle : (isActive ? predictedAngle() : rawAngle)
         visualAngle.advance(to: target, dt: dt)
 
         guard isClosingOut else {
@@ -860,6 +929,7 @@ final class LidController: ObservableObject {
                 self.overlay.discardLive()
                 self.snapshotter.discard()
                 Task { await self.snapshotter.warmFilter() }
+                self.preparePortal()
             }
         }
     }
@@ -895,7 +965,10 @@ final class LidController: ObservableObject {
             rawAngle = angle
             visualAngle.reset(to: angle)
         }
-        if isPushing { sensor.setReportInterval(Self.idlePushInterval) }
+        if isPushing {
+            pushInterval = Self.nearPushInterval
+            sensor.setReportInterval(pushInterval)
+        }
         wake()
     }
 }

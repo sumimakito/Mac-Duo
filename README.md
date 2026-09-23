@@ -19,8 +19,8 @@ Mac Duo adds this effect to your MacBook, with controls in the menu bar.
 
 With the default settings, it's recommended to view the effect in front of your MacBook.
 
-- **Window server rendering:** By default the macOS window server folds the live screen itself, the way the iPhone Fold does: the screen stays flat while the glass folds away, so content is drawn out from the hinge, softens and darkens toward the far edge. Nothing is captured, so no Screen Recording permission is needed.
-- **Low power:** The lid sensor pushes its readings, so the app sleeps until the lid moves. Idle CPU use is around 0.03%.
+- **Window server rendering:** By default the macOS window server draws the effect on the live screen, modelled on a frosted sheet lifted off a page: the screen stays where the glass started, each point blurs by how far the glass has moved away from it, sharp at the hinge, and darkens by the light it loses. Nothing is captured, so no Screen Recording permission is needed.
+- **Low power:** The lid sensor pushes its readings, so the app sleeps until the lid moves. Idle CPU use is under 0.1%.
 - **Metal rendering:** Turn off "No Screen Recording" to capture the screen with ScreenCaptureKit and render it with Metal instead.
 - **Adjustable perspective:** Tweak the lean and perspective to suit your viewing position.
 
