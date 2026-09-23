@@ -14,6 +14,12 @@ import IOKit.hid
 ///   degree. Not every model declares it, so report 1 is the fallback.
 ///
 /// The value refreshes about every 100 ms and needs no permission.
+///
+/// Reading a report is a round trip to the sensor coprocessor, which costs a
+/// few hundred microseconds of CPU each time. The sensor can also push report 1
+/// on its own: once a second by default, or at a set interval once its
+/// `AppleSPUHIDDriver` is told to report. `startReporting` uses that, so a
+/// watcher that only needs to notice the lid starting to move never polls.
 public final class LidAngleSensor {
 
     /// Which report the sensor answers with, decided once at open time.
@@ -55,6 +61,13 @@ public final class LidAngleSensor {
     private var manager: IOHIDManager?
     private var device: IOHIDDevice?
     private var buffer = [UInt8](repeating: 0, count: 32)
+    private var driver: io_object_t = 0
+    private var pushBuffer: UnsafeMutablePointer<UInt8>?
+    private var pushHandler: ((Double) -> Void)?
+    /// Pushed reports land on the caller's queue; the handler is set and
+    /// cleared from another.
+    private let handlerLock = NSLock()
+    private static let pushBufferSize = 64
 
     public var isAvailable: Bool { device != nil && resolution != nil }
 
@@ -63,6 +76,8 @@ public final class LidAngleSensor {
     }
 
     deinit {
+        stopReporting()
+        if driver != 0 { IOObjectRelease(driver) }
         if let manager {
             IOHIDManagerClose(manager, IOOptionBits(kIOHIDOptionsTypeNone))
         }
@@ -95,6 +110,88 @@ public final class LidAngleSensor {
             return nil
         }
         return degrees
+    }
+
+    // MARK: - Pushed reports
+
+    /// Starts the sensor pushing whole degree readings to `handler` on
+    /// `queue`, about `interval` apart. Returns false when the sensor cannot
+    /// push, and the caller has to poll.
+    ///
+    /// The interval is a setting on the sensor driver, shared by the whole
+    /// system and kept after this process exits, so `stopReporting()` must
+    /// run before exit.
+    @discardableResult
+    public func startReporting(
+        interval: TimeInterval,
+        queue: DispatchQueue,
+        handler: @escaping (Double) -> Void
+    ) -> Bool {
+        guard let device, pushBuffer == nil else { return pushBuffer != nil }
+        let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: Self.pushBufferSize)
+        pushBuffer = buffer
+        handlerLock.lock()
+        pushHandler = handler
+        handlerLock.unlock()
+        let context = Unmanaged.passUnretained(self).toOpaque()
+        IOHIDDeviceRegisterInputReportCallback(device, buffer, Self.pushBufferSize, { context, result, _, _, reportID, report, length in
+            guard let context, result == kIOReturnSuccess, reportID == 1, length >= 3 else { return }
+            let sensor = Unmanaged<LidAngleSensor>.fromOpaque(context).takeUnretainedValue()
+            let degrees = Double(UInt16(report[1]) | UInt16(report[2]) << 8)
+            guard degrees <= 360 else { return }
+            sensor.handlerLock.lock()
+            let handler = sensor.pushHandler
+            sensor.handlerLock.unlock()
+            handler?(degrees)
+        }, context)
+        IOHIDDeviceSetDispatchQueue(device, queue)
+        IOHIDDeviceActivate(device)
+        setReportInterval(interval)
+        return true
+    }
+
+    /// Changes how often pushed readings arrive. Zero leaves the sensor's own
+    /// once a second.
+    public func setReportInterval(_ interval: TimeInterval) {
+        guard let driver = lidDriver() else { return }
+        let microseconds = max(Int((interval * 1_000_000).rounded()), 0)
+        IORegistryEntrySetCFProperty(driver, "SensorPropertyReportingState" as CFString, NSNumber(value: microseconds > 0 ? 1 : 0))
+        IORegistryEntrySetCFProperty(driver, "SensorPropertyPowerState" as CFString, NSNumber(value: microseconds > 0 ? 1 : 0))
+        IORegistryEntrySetCFProperty(driver, "ReportInterval" as CFString, NSNumber(value: microseconds))
+    }
+
+    /// Puts the sensor back to its own once a second and stops the handler.
+    public func stopReporting() {
+        guard pushBuffer != nil else { return }
+        setReportInterval(0)
+        handlerLock.lock()
+        pushHandler = nil
+        handlerLock.unlock()
+        // The callback stays registered on the activated device; with no
+        // handler it returns at once. Unregistering from another queue races
+        // a callback already running.
+    }
+
+    /// The `AppleSPUHIDDriver` behind the lid angle, which holds the report
+    /// interval.
+    private func lidDriver() -> io_object_t? {
+        if driver != 0 { return driver }
+        var iterator: io_iterator_t = 0
+        guard IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceMatching("AppleSPUHIDDriver"), &iterator) == KERN_SUCCESS
+        else { return nil }
+        defer { IOObjectRelease(iterator) }
+        while case let entry = IOIteratorNext(iterator), entry != 0 {
+            let page = IORegistryEntryCreateCFProperty(entry, "PrimaryUsagePage" as CFString, kCFAllocatorDefault, 0)?
+                .takeRetainedValue() as? Int
+            let usage = IORegistryEntryCreateCFProperty(entry, "PrimaryUsage" as CFString, kCFAllocatorDefault, 0)?
+                .takeRetainedValue() as? Int
+            if page == 0x20, usage == 0x8A {
+                driver = entry
+                return entry
+            }
+            IOObjectRelease(entry)
+        }
+        return nil
     }
 
     // MARK: - Device

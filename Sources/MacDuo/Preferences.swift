@@ -19,11 +19,12 @@ final class Preferences: ObservableObject {
         static let dimReach = "dimReach"
         static let showsAngleInMenuBar = "showsAngleInMenuBar"
         static let isLivePicture = "isLivePicture"
+        static let usesWindowServer = "usesWindowServer"
 
         static let all = [
             isEnabled, isTimeoutEnabled, thresholdAngle, blurSpan, maxBlurRadius,
             maxDim, viewingDistance, recession, blurEvenness, dimReach,
-            showsAngleInMenuBar, isLivePicture,
+            showsAngleInMenuBar, isLivePicture, usesWindowServer,
         ]
     }
 
@@ -32,14 +33,15 @@ final class Preferences: ObservableObject {
         Key.isTimeoutEnabled: false,
         Key.thresholdAngle: 90.0,
         Key.blurSpan: 60.0,
-        Key.maxBlurRadius: 135.0,
+        Key.maxBlurRadius: 100.0,
         Key.maxDim: 1.0,
         Key.viewingDistance: 6.0,
-        Key.recession: 1.0,
+        Key.recession: 0.0,
         Key.blurEvenness: 0.0,
-        Key.dimReach: 0.5,
+        Key.dimReach: 1.0,
         Key.showsAngleInMenuBar: false,
         Key.isLivePicture: true,
+        Key.usesWindowServer: true,
     ]
 
     /// Master switch for the depth effect.
@@ -108,6 +110,13 @@ final class Preferences: ObservableObject {
         didSet { defaults.set(isLivePicture, forKey: Key.isLivePicture) }
     }
 
+    /// Let the window server lean, blur and dim the live screen behind the
+    /// overlay instead of capturing it. No Screen Recording permission and
+    /// far less power.
+    @Published var usesWindowServer: Bool {
+        didSet { defaults.set(usesWindowServer, forKey: Key.usesWindowServer) }
+    }
+
     /// Eye distance in screen heights, at the two ends of the perspective
     /// slider. The panel offers the strength, which runs the other way.
     static let farthestEye: Double = 6
@@ -115,7 +124,7 @@ final class Preferences: ObservableObject {
     static let eyeRange: Double = farthestEye - nearestEye
 
     /// Highest angle above the threshold at which the pre-warm may run.
-    let prewarmCeiling: Double = 70
+    let prewarmCeiling: Double = 35
 
     /// Closing speed in degrees per second that starts the pre-warm.
     let closingSpeed: Double = 8
@@ -154,6 +163,7 @@ final class Preferences: ObservableObject {
         dimReach = defaults.double(forKey: Key.dimReach)
         showsAngleInMenuBar = defaults.bool(forKey: Key.showsAngleInMenuBar)
         isLivePicture = defaults.bool(forKey: Key.isLivePicture)
+        usesWindowServer = defaults.bool(forKey: Key.usesWindowServer)
     }
 
     func resetToDefaults() {
@@ -172,5 +182,6 @@ final class Preferences: ObservableObject {
         dimReach = defaults.double(forKey: Key.dimReach)
         showsAngleInMenuBar = defaults.bool(forKey: Key.showsAngleInMenuBar)
         isLivePicture = defaults.bool(forKey: Key.isLivePicture)
+        usesWindowServer = defaults.bool(forKey: Key.usesWindowServer)
     }
 }

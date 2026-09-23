@@ -42,7 +42,7 @@ struct SettingsView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 10) {
                         switches
-                        if !hasScreenPermission {
+                        if !hasScreenPermission, !preferences.usesWindowServer {
                             permissionNotice
                         }
                         startGroup
@@ -97,11 +97,17 @@ struct SettingsView: View {
                 help: localized("Leans the screen away as the lid closes.")
             )
             toggleRow(
+                localized("No Screen Recording"),
+                isOn: $preferences.usesWindowServer,
+                help: localized("macOS itself leans, stretches and blurs the live screen. Off captures the screen instead, which needs Screen Recording and more power.")
+            )
+            .disabled(!preferences.isEnabled)
+            toggleRow(
                 localized("Live rendering"),
                 isOn: $preferences.isLivePicture,
                 help: localized("Off holds the frame from when the effect started.")
             )
-            .disabled(!preferences.isEnabled)
+            .disabled(!preferences.isEnabled || preferences.usesWindowServer)
         }
     }
 
@@ -120,27 +126,39 @@ struct SettingsView: View {
                 localized("Full effect after"), value: $preferences.blurSpan, in: 5...60, format: "%.0f°",
                 help: localized("Degrees of further closing to reach full strength.")
             )
+            // The window server glass follows the lift itself.
+            .disabled(preferences.usesWindowServer)
         }
     }
 
     private var lookGroup: some View {
         group(localized("Look")) {
+            // The window server glass is a frosted sheet: the blur setting is
+            // how frosted, with 100 as tracing paper, and the dimming how much
+            // of the light it loses shows.
             slider(
-                localized("Blur"), value: $preferences.maxBlurRadius, in: 10...160, format: "%.0f pt",
-                help: localized("Blur radius at the far edge.")
+                localized("Blur"), value: $preferences.maxBlurRadius, in: 10...160,
+                format: preferences.usesWindowServer ? "%.0f%%" : "%.0f pt",
+                help: preferences.usesWindowServer
+                    ? localized("How frosted the glass is. 100% is tracing paper.")
+                    : localized("Blur radius at the far edge.")
             )
             slider(
                 localized("Blur spread"), value: $preferences.blurEvenness, in: 0...1, format: "%.0f%%", scale: 100,
                 help: localized("0 blurs the far edge only, 100 the whole picture.")
             )
+            .disabled(preferences.usesWindowServer)
             slider(
                 localized("Dimming"), value: $preferences.maxDim, in: 0...1, format: "%.0f%%", scale: 100,
-                help: localized("How dark the far edge goes.")
+                help: preferences.usesWindowServer
+                    ? localized("How much of the light the lifted glass loses shows as dark.")
+                    : localized("How dark the far edge goes.")
             )
             slider(
                 localized("Dimming spread"), value: $preferences.dimReach, in: 0.2...1, format: "%.0f%%", scale: 100,
                 help: localized("Everything above this height goes fully dark.")
             )
+            .disabled(preferences.usesWindowServer)
         }
     }
 
@@ -155,6 +173,8 @@ struct SettingsView: View {
                 help: localized("0 keeps the sides parallel, 100 converges sharply.")
             )
         }
+        // The window server fold has its own geometry.
+        .disabled(!preferences.isEnabled || preferences.usesWindowServer)
     }
 
     private var appGroup: some View {

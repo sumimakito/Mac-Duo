@@ -36,3 +36,7 @@
 "Language" = "语言";
 "System" = "跟随系统";
 "Chinese (Simplified)" = "简体中文";
+"No Screen Recording" = "无需屏幕录制";
+"macOS itself leans, stretches and blurs the live screen. Off captures the screen instead, which needs Screen Recording and more power." = "由 macOS 自行倾斜、拉伸并模糊实时屏幕。关闭后改为录制屏幕，需要屏幕录制权限且更耗电。";
+"How frosted the glass is. 100% is tracing paper." = "玻璃的磨砂程度。100% 相当于描图纸。";
+"How much of the light the lifted glass loses shows as dark." = "抬起的玻璃损失的光线有多少显示为暗部。";
