@@ -23,6 +23,7 @@ final class DepthRenderer {
         var paddedAndBlur: SIMD4<Float>
         var shape: SIMD4<Float>
         var light: SIMD4<Float>
+        var blurColor: SIMD4<Float>
     }
 
     /// One held picture, built off the main thread and adopted on it.
@@ -115,9 +116,14 @@ final class DepthRenderer {
         target.needsDisplayOnBoundsChange = true
     }
 
-    /// Puts the picture on a black margin, uploads it, and builds the pyramid.
+    /// Puts the picture on a colored margin, uploads it, and builds the pyramid.
     /// Call this off the main thread.
-    nonisolated func makePicture(image: CGImage, screenSize: CGSize, pixelScale: CGFloat) -> PreparedPicture? {
+    nonisolated func makePicture(
+        image: CGImage,
+        screenSize: CGSize,
+        pixelScale: CGFloat,
+        blurColor: CGColor = CGColor(red: 0, green: 0, blue: 0, alpha: 1)
+    ) -> PreparedPicture? {
         let started = CFAbsoluteTimeGetCurrent()
         let padding = Self.paddingInPoints
         let paddedSize = CGSize(
@@ -148,7 +154,7 @@ final class DepthRenderer {
         ) else { return nil }
         let contextReady = CFAbsoluteTimeGetCurrent()
 
-        context.setFillColor(CGColor(red: 0, green: 0, blue: 0, alpha: 1))
+        context.setFillColor(blurColor)
         context.fill(CGRect(x: 0, y: 0, width: width, height: height))
         let inset = padding * pixelScale
         context.draw(image, in: CGRect(
@@ -211,11 +217,15 @@ final class DepthRenderer {
 
     // MARK: - Live source
 
-    /// Prepares the picture for a live stream. The margin is filled with black
-    /// once; every frame after that only overwrites the interior. Nothing is
+    /// Prepares the picture for a live stream. The margin is filled with the blur
+    /// color once; every frame after that only overwrites the interior. Nothing is
     /// drawn until the first frame lands.
     @discardableResult
-    func beginLive(screenSize: CGSize, pixelScale: CGFloat) -> Bool {
+    func beginLive(
+        screenSize: CGSize,
+        pixelScale: CGFloat,
+        blurColor: SIMD4<Float> = SIMD4<Float>(0, 0, 0, 1)
+    ) -> Bool {
         let padding = Self.paddingInPoints
         let padded = CGSize(
             width: screenSize.width + 2 * padding,
@@ -232,12 +242,12 @@ final class DepthRenderer {
                 height: height,
                 mipmapped: true
             )
-            // `renderTarget` is only there for the one clear that blacks the
+            // `renderTarget` is only there for the one clear that colors the
             // margin.
             descriptor.usage = [.shaderRead, .shaderWrite, .renderTarget]
             descriptor.storageMode = .private
             guard let fresh = device.makeTexture(descriptor: descriptor) else { return false }
-            clearToBlack(fresh)
+            clearToColor(fresh, color: blurColor)
             liveTexture = fresh
             liveSize = padded
             liveScale = pixelScale
@@ -364,12 +374,17 @@ final class DepthRenderer {
         liveScale = 0
     }
 
-    private func clearToBlack(_ target: MTLTexture) {
+    private func clearToColor(_ target: MTLTexture, color: SIMD4<Float> = SIMD4<Float>(0, 0, 0, 1)) {
         let pass = MTLRenderPassDescriptor()
         pass.colorAttachments[0].texture = target
         pass.colorAttachments[0].loadAction = .clear
         pass.colorAttachments[0].storeAction = .store
-        pass.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
+        pass.colorAttachments[0].clearColor = MTLClearColor(
+            red: Double(color.x),
+            green: Double(color.y),
+            blue: Double(color.z),
+            alpha: 1.0
+        )
         guard let commands = queue.makeCommandBuffer(),
               let encoder = commands.makeRenderCommandEncoder(descriptor: pass) else { return }
         encoder.endEncoding()
@@ -410,7 +425,8 @@ final class DepthRenderer {
         dimHingeFloor: Double,
         dimReach: Double,
         maxBlurRadius: Double,
-        maxDim: Double
+        maxDim: Double,
+        blurColor: SIMD4<Float> = SIMD4<Float>(0, 0, 0, 1)
     ) {
         guard let commands = queue.makeCommandBuffer() else { return }
         absorbPending(into: commands)
@@ -444,14 +460,20 @@ final class DepthRenderer {
                 Float(maxBlurRadius * Double(pixelScale)), Float(blurStrength)
             ),
             shape: SIMD4(Float(hingeFloor), Float(maxDim), Float(pixelScale), maxLevel),
-            light: SIMD4(Float(dimHingeFloor), Float(dimStrength), Float(dimReach), 0)
+            light: SIMD4(Float(dimHingeFloor), Float(dimStrength), Float(dimReach), 0),
+            blurColor: blurColor
         )
 
         let pass = MTLRenderPassDescriptor()
         pass.colorAttachments[0].texture = drawable.texture
         pass.colorAttachments[0].loadAction = .clear
         pass.colorAttachments[0].storeAction = .store
-        pass.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
+        pass.colorAttachments[0].clearColor = MTLClearColor(
+            red: Double(blurColor.x),
+            green: Double(blurColor.y),
+            blue: Double(blurColor.z),
+            alpha: 1.0
+        )
 
         guard let encoder = commands.makeRenderCommandEncoder(descriptor: pass) else {
             commands.commit()

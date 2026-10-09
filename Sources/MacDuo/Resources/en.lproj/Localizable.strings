@@ -17,6 +17,17 @@
 "Blur radius at the far edge." = "Blur radius at the far edge.";
 "Blur spread" = "Blur spread";
 "0 blurs the far edge only, 100 the whole picture." = "0 blurs the far edge only, 100 the whole picture.";
+"Blur color" = "Blur color";
+"Custom color" = "Custom color";
+"Black" = "Black";
+"White" = "White";
+"Slate" = "Slate";
+"Navy" = "Navy";
+"Purple" = "Purple";
+"Cyan" = "Cyan";
+"Orange" = "Orange";
+"Rose" = "Rose";
+"Emerald" = "Emerald";
 "Dimming" = "Dimming";
 "How dark the far edge goes." = "How dark the far edge goes.";
 "Dimming spread" = "Dimming spread";
@@ -35,4 +46,5 @@
 "Could not open System Settings. Open it manually and enable screen recording for Mac Duo under Privacy & Security." = "Could not open System Settings. Open it manually and enable screen recording for Mac Duo under Privacy & Security.";
 "Language" = "Language";
 "System" = "System";
+"Spanish" = "Spanish";
 "Chinese (Simplified)" = "Chinese (Simplified)";

@@ -3,14 +3,21 @@ import Foundation
 /// The panel language is independent of effect settings and survives Reset.
 enum SettingsLanguage: String, CaseIterable {
     case english = "en"
+    case spanish = "es"
     case chinese = "zh-Hans"
 
     /// The system language, matched against the cases. `preferredLocalizations`
     /// only considers languages the app declares in `CFBundleLocalizations`, so
     /// `Resources/Info.plist` must list every case.
     static var preferred: Self {
-        let best = Bundle.preferredLocalizations(from: allCases.map(\.rawValue)).first
-        return allCases.first { $0.rawValue == best } ?? .english
+        let preferred = Bundle.preferredLocalizations(from: ["en", "es", "zh-Hans"]).first
+        if preferred == "es" || preferred?.hasPrefix("es") == true {
+            return .spanish
+        } else if preferred == "zh-Hans" || preferred?.hasPrefix("zh") == true {
+            return .chinese
+        } else {
+            return .english
+        }
     }
 
     // Packaged apps keep resources in Contents/Resources; SwiftPM's generated

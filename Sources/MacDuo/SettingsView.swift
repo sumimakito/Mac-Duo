@@ -17,9 +17,21 @@ struct SettingsView: View {
         selectedLanguage.localized(key)
     }
 
-    @State private var launchesAtLogin = SMAppService.mainApp.status == .enabled
-    @State private var hasScreenPermission = CGPreflightScreenCaptureAccess()
-    @State private var settingsOpenFailed = false
+    private var _launchesAtLogin = State(initialValue: SMAppService.mainApp.status == .enabled)
+    private var launchesAtLogin: Bool {
+        get { _launchesAtLogin.wrappedValue }
+        nonmutating set { _launchesAtLogin.wrappedValue = newValue }
+    }
+
+    private var hasScreenPermission: Bool {
+        CGPreflightScreenCaptureAccess()
+    }
+
+    private var _settingsOpenFailed = State(initialValue: false)
+    private var settingsOpenFailed: Bool {
+        get { _settingsOpenFailed.wrappedValue }
+        nonmutating set { _settingsOpenFailed.wrappedValue = newValue }
+    }
 
     var onQuit: () -> Void
 
@@ -65,10 +77,6 @@ struct SettingsView: View {
                 .padding(.bottom, 12)
         }
         .frame(width: Self.width)
-        .onAppear { hasScreenPermission = CGPreflightScreenCaptureAccess() }
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            hasScreenPermission = CGPreflightScreenCaptureAccess()
-        }
     }
 
     private var header: some View {
@@ -133,6 +141,7 @@ struct SettingsView: View {
                 localized("Blur spread"), value: $preferences.blurEvenness, in: 0...1, format: "%.0f%%", scale: 100,
                 help: localized("0 blurs the far edge only, 100 the whole picture.")
             )
+            blurColorRow
             slider(
                 localized("Dimming"), value: $preferences.maxDim, in: 0...1, format: "%.0f%%", scale: 100,
                 help: localized("How dark the far edge goes.")
@@ -165,6 +174,7 @@ struct SettingsView: View {
                 Picker("", selection: $language) {
                     Text(localized("System")).tag("")
                     Text(verbatim: "English").tag(SettingsLanguage.english.rawValue)
+                    Text(localized("Spanish")).tag(SettingsLanguage.spanish.rawValue)
                     Text(localized("Chinese (Simplified)")).tag(SettingsLanguage.chinese.rawValue)
                 }
                 .labelsHidden()
@@ -174,7 +184,7 @@ struct SettingsView: View {
                 .accessibilityLabel(localized("Language"))
             }
             toggleRow(localized("Show angle in menu bar"), isOn: $preferences.showsAngleInMenuBar, help: nil)
-            toggleRow(localized("Launch at login"), isOn: $launchesAtLogin, help: nil)
+            toggleRow(localized("Launch at login"), isOn: _launchesAtLogin.projectedValue, help: nil)
                 .onChange(of: launchesAtLogin) { _, newValue in
                     setLaunchAtLogin(newValue)
                 }
@@ -222,6 +232,98 @@ struct SettingsView: View {
         }
     }
 
+    private struct ColorPreset: Identifiable {
+        let id: String
+        let name: String
+        let hex: String
+        let color: Color
+    }
+
+    private var colorPresets: [ColorPreset] {
+        [
+            ColorPreset(id: "black", name: localized("Black"), hex: "#000000", color: .black),
+            ColorPreset(id: "white", name: localized("White"), hex: "#FFFFFF", color: .white),
+            ColorPreset(id: "slate", name: localized("Slate"), hex: "#334155", color: Color(red: 51/255, green: 65/255, blue: 85/255)),
+            ColorPreset(id: "navy", name: localized("Navy"), hex: "#0F172A", color: Color(red: 15/255, green: 23/255, blue: 42/255)),
+            ColorPreset(id: "purple", name: localized("Purple"), hex: "#8B5CF6", color: Color(red: 139/255, green: 92/255, blue: 246/255)),
+            ColorPreset(id: "cyan", name: localized("Cyan"), hex: "#06B6D4", color: Color(red: 6/255, green: 182/255, blue: 212/255)),
+            ColorPreset(id: "orange", name: localized("Orange"), hex: "#F97316", color: Color(red: 249/255, green: 115/255, blue: 22/255)),
+            ColorPreset(id: "rose", name: localized("Rose"), hex: "#F43F5E", color: Color(red: 244/255, green: 63/255, blue: 94/255)),
+            ColorPreset(id: "emerald", name: localized("Emerald"), hex: "#10B981", color: Color(red: 16/255, green: 185/255, blue: 129/255)),
+        ]
+    }
+
+    private var blurColorRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(localized("Blur color"))
+                Spacer()
+                ColorPicker("", selection: blurColorBinding, supportsOpacity: false)
+                    .labelsHidden()
+                    .scaleEffect(0.85)
+                    .frame(width: 24, height: 24)
+                    .help(localized("Custom color"))
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 7) {
+                    ForEach(colorPresets) { preset in
+                        colorPresetButton(preset)
+                    }
+                }
+                .padding(.vertical, 3)
+                .padding(.horizontal, 1)
+            }
+        }
+    }
+
+    private func colorPresetButton(_ preset: ColorPreset) -> some View {
+        let isSelected = preferences.blurColor.uppercased() == preset.hex.uppercased()
+        return Button {
+            preferences.blurColor = preset.hex
+        } label: {
+            ZStack {
+                Circle()
+                    .fill(preset.color)
+                    .frame(width: 18, height: 18)
+                    .overlay(
+                        Circle()
+                            .strokeBorder(Color.primary.opacity(0.2), lineWidth: 1)
+                    )
+                if isSelected {
+                    Circle()
+                        .strokeBorder(preset.hex == "#FFFFFF" ? Color.black : Color.white, lineWidth: 2)
+                        .frame(width: 10, height: 10)
+                }
+            }
+            .frame(width: 22, height: 22)
+            .background(
+                Circle()
+                    .strokeBorder(isSelected ? Color.accentColor : Color.clear, lineWidth: 2)
+            )
+        }
+        .buttonStyle(.plain)
+        .help(preset.name)
+        .pointingHand()
+    }
+
+    private var blurColorBinding: Binding<Color> {
+        Binding(
+            get: {
+                let (r, g, b, a) = Preferences.parseHexColor(preferences.blurColor)
+                return Color(red: r, green: g, blue: b, opacity: a)
+            },
+            set: { newColor in
+                if let nsColor = NSColor(newColor).usingColorSpace(.sRGB) {
+                    let r = Int(round(max(0, min(1, nsColor.redComponent)) * 255))
+                    let g = Int(round(max(0, min(1, nsColor.greenComponent)) * 255))
+                    let b = Int(round(max(0, min(1, nsColor.blueComponent)) * 255))
+                    preferences.blurColor = String(format: "#%02X%02X%02X", r, g, b)
+                }
+            }
+        )
+    }
+
     private var perspective: Binding<Double> {
         Binding(
             get: { (Preferences.farthestEye - preferences.viewingDistance) / Preferences.eyeRange },
@@ -253,6 +355,7 @@ struct SettingsView: View {
     }
 
     private func openScreenRecordingSettings() {
+        _ = CGRequestScreenCaptureAccess()
         settingsOpenFailed = false
         Task { @MainActor in
             do {
@@ -324,7 +427,11 @@ private extension View {
 }
 
 private struct PointingHand: ViewModifier {
-    @State private var pushed = false
+    private var _pushed = State(initialValue: false)
+    private var pushed: Bool {
+        get { _pushed.wrappedValue }
+        nonmutating set { _pushed.wrappedValue = newValue }
+    }
 
     func body(content: Content) -> some View {
         content

@@ -661,7 +661,9 @@ final class LidController: ObservableObject {
             blurEvenness: preferences.blurEvenness,
             dimReach: preferences.dimReach,
             maxBlurRadius: preferences.maxBlurRadius,
-            maxDim: preferences.maxDim
+            maxDim: preferences.maxDim,
+            blurColor: preferences.blurColorSIMD,
+            blurCGColor: preferences.blurColorCGColor
         )
     }
 
