@@ -73,8 +73,6 @@ final class LidController: ObservableObject {
     private static let idlePollInterval: TimeInterval = 1.0 / 8
     private static let activePollInterval: TimeInterval = 1.0 / 30
     private static let fadeInDuration: TimeInterval = 0.07
-    /// Degrees above the pre-warm zone at which polling speeds up.
-    private static let fastPollMargin: Double = 20
 
     /// Closing speed that counts as a deliberate close, in degrees per second.
     /// A still lid reads under 0.5.
@@ -286,9 +284,14 @@ final class LidController: ObservableObject {
             reconcile(angle: angle)
         }
 
-        let prewarmZone = preferences.thresholdAngle + preferences.prewarmCeiling
+        // A lid resting open sits inside the pre-warm zone, so speeding up by
+        // angle alone kept the fast rate on all the time. The idle rate still
+        // sees a close start within one reading.
+        let closingRecently = CACurrentMediaTime() - lastClosingTime < preferences.prewarmLinger
+        let isMoving = abs(angularVelocity) >= Self.triggerClosingSpeed
         let wantsFastPolling = preferences.isEnabled
-            && (preview != nil || isActive || angle <= prewarmZone + Self.fastPollMargin)
+            && (preview != nil || isActive || isClosingOut || isMoving || closingRecently
+                || angle <= preferences.thresholdAngle + preferences.hysteresis)
         setPollInterval(wantsFastPolling ? Self.activePollInterval : Self.idlePollInterval)
     }
 
