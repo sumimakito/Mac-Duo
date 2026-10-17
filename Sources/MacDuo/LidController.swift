@@ -47,6 +47,17 @@ final class LidController: ObservableObject {
     private var consecutiveFailedReads = 0
     private var startedAt: CFTimeInterval = 0
     private var preview: PreviewRun?
+    private var reveal: RevealRun?
+    /// The desktop picture, for the reveal on the lock screen. Refreshed at
+    /// launch and whenever the lid starts closing, while it can be captured.
+    private var wallpaperImage: CGImage?
+    private var wallpaperTask: Task<Void, Never>?
+    /// Set when the machine went to sleep with the lid below the start angle,
+    /// so the wake that follows came from opening it.
+    private var sleptWithLidShut = false
+    /// Armed by such a wake. The reveal plays once the desktop is visible,
+    /// which with a password is only after unlocking.
+    private var isRevealPending = false
     private var isSuspended = false
     private var isCapturePending = false
     private var motionIntent = LidMotionIntent()
@@ -115,6 +126,13 @@ final class LidController: ObservableObject {
     /// Safety cap, in case the spring never quite settles.
     private static let closingOutMaxDuration: TimeInterval = 1.2
 
+    /// The reveal fades in over the sharp desktop, so a quick cut would flash.
+    private static let revealFadeInDuration: TimeInterval = 0.18
+    /// How long the reveal waits for its screenshot before giving up.
+    private static let revealPictureTimeout: TimeInterval = 1
+    /// Gives the display a moment to light up after waking.
+    private static let revealWakeDelay: TimeInterval = 0.3
+
     /// A scripted angle sweep, so the settings panel can show the effect
     /// without the lid moving. It feeds the same path the sensor feeds.
     private struct PreviewRun {
@@ -134,6 +152,29 @@ final class LidController: ObservableObject {
                 return shut + (open - shut) * ((elapsed - closing - hold) / opening)
             }
             return nil
+        }
+    }
+
+    /// A scripted opening, played after waking from a closed lid. The lid is
+    /// usually already open by the time the desktop shows, so it runs on a
+    /// clock rather than on the sensor.
+    private struct RevealRun {
+        var requestedAt: CFTimeInterval
+        /// Moves forward until the picture is ready, so the clock only starts
+        /// once there is something to clear.
+        var startedAt: CFTimeInterval
+        let shut: Double
+        let open: Double
+        /// Set when the run plays on the lock screen, in place of a capture.
+        let lockScreenImage: CGImage?
+        let duration: CFTimeInterval = 0.9
+
+        /// `nil` once the run is over.
+        func angle(at now: CFTimeInterval) -> Double? {
+            let t = (now - startedAt) / duration
+            guard t < 1 else { return nil }
+            let eased = 1 - pow(1 - max(t, 0), 3)
+            return shut + (open - shut) * eased
         }
     }
 
@@ -169,6 +210,25 @@ final class LidController: ObservableObject {
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.runPreview() }
         }
+        // Plays the lock screen reveal without locking, for testing.
+        DistributedNotificationCenter.default().addObserver(
+            forName: Notification.Name("to.maki.MacDuo.lockScreenReveal"),
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                // The same steps as a real sleep and wake, a second apart.
+                guard let self, !self.isActive else { return }
+                self.isSuspended = true
+                self.armLockScreenReveal()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                    MainActor.assumeIsolated {
+                        self.isSuspended = false
+                        _ = self.startArmedReveal()
+                    }
+                }
+            }
+        }
         overlay.warmUp()
         Task {
             await snapshotter.warmFilter()
@@ -176,6 +236,7 @@ final class LidController: ObservableObject {
             // can name this app and leave the overlay out of the picture.
             try? await Task.sleep(nanoseconds: 500_000_000)
             await streamer.warmFilter()
+            refreshWallpaper()
         }
     }
 
@@ -197,6 +258,7 @@ final class LidController: ObservableObject {
         streamer.stop()
         overlay.discardLive()
         preview = nil
+        reveal = nil
         isActive = false
     }
 
@@ -242,6 +304,10 @@ final class LidController: ObservableObject {
 
     private func poll() {
         guard !isSuspended else { return }
+        if reveal != nil {
+            stepReveal()
+            return
+        }
 
         let angle: Double
         if let run = preview {
@@ -290,6 +356,82 @@ final class LidController: ObservableObject {
         let wantsFastPolling = preferences.isEnabled
             && (preview != nil || isActive || angle <= prewarmZone + Self.fastPollMargin)
         setPollInterval(wantsFastPolling ? Self.activePollInterval : Self.idlePollInterval)
+    }
+
+    // MARK: - Reveal
+
+    /// Plays the reveal if a wake from a closed lid armed it. On the lock
+    /// screen it plays over the wallpaper, since the lock screen itself cannot
+    /// be captured; without the lock screen space it waits for the unlock.
+    private func revealIfPending() {
+        guard isRevealPending, !isSuspended else { return }
+        var lockScreenImage: CGImage?
+        if isScreenLocked {
+            guard LockScreenSpace.shared.isAvailable, let image = wallpaperImage else {
+                Diagnostics.lid.notice("reveal: waiting for unlock")
+                return
+            }
+            lockScreenImage = image
+        }
+        isRevealPending = false
+        guard preferences.isEnabled, preferences.playsOnOpen, preview == nil, !isActive,
+              builtInLayout.displayID != nil else {
+            Diagnostics.lid.notice(
+                """
+                reveal: skipped, enabled \(self.preferences.isEnabled) on open \(self.preferences.playsOnOpen) \
+                preview \(self.preview != nil) active \(self.isActive) display \(self.builtInLayout.displayID != nil)
+                """
+            )
+            return
+        }
+        let now = CACurrentMediaTime()
+        let run = RevealRun(
+            requestedAt: now,
+            startedAt: now,
+            shut: max(preferences.thresholdAngle - preferences.blurSpan, 5),
+            open: preferences.thresholdAngle,
+            lockScreenImage: lockScreenImage
+        )
+        Diagnostics.lid.notice("reveal: start, lock screen \(lockScreenImage != nil)")
+        reveal = run
+        rawAngle = run.shut
+        setActive(true)
+    }
+
+    private func stepReveal() {
+        guard var run = reveal else { return }
+        let now = CACurrentMediaTime()
+        guard overlay.isPictureReady else {
+            guard now - run.requestedAt < Self.revealPictureTimeout else {
+                Diagnostics.lid.notice("reveal: no picture in time")
+                setActive(false)
+                return
+            }
+            run.startedAt = now
+            reveal = run
+            return
+        }
+        guard let angle = run.angle(at: now) else {
+            setActive(false)
+            return
+        }
+        rawAngle = angle
+    }
+
+    private func refreshWallpaper() {
+        guard wallpaperTask == nil, preferences.playsOnOpen, LockScreenSpace.shared.isAvailable,
+              let screen = NSScreen.builtIn else { return }
+        wallpaperTask = Task { [weak self] in
+            let image = await WallpaperCapture.capture(on: screen)
+            guard let self else { return }
+            self.wallpaperTask = nil
+            if let image { self.wallpaperImage = image }
+        }
+    }
+
+    private var isScreenLocked: Bool {
+        guard let session = CGSessionCopyCurrentDictionary() as? [String: Any] else { return false }
+        return session["CGSSessionScreenIsLocked"] as? Bool ?? false
     }
 
     private var effectPolicy: LidEffectPolicy {
@@ -471,7 +613,11 @@ final class LidController: ObservableObject {
             snapshotter.endPrewarm()
             setPollInterval(Self.activePollInterval)
             presentPicture()
+            // A close may end on the lock screen, so the picture for its
+            // reveal should be current.
+            if reveal == nil { refreshWallpaper() }
         } else {
+            reveal = nil
             snapshotter.discard()
             timeoutReferenceAngle = nil
             beginClosingOut()
@@ -506,12 +652,24 @@ final class LidController: ObservableObject {
     /// already running counts as that wait.
     private func presentPicture() {
         guard preferences.isEnabled, !isSuspended, isActive else { return }
+        if let image = reveal?.lockScreenImage, let screen = NSScreen.builtIn {
+            overlay.show(
+                image: image,
+                on: screen,
+                startAngle: preferences.thresholdAngle,
+                tuning: tuning,
+                fadeIn: pictureFadeIn,
+                onLockScreen: true
+            )
+            startDisplayLink()
+            return
+        }
         if preferences.isLivePicture, let screen = NSScreen.builtIn,
            overlay.showLive(
                on: screen,
                startAngle: preferences.thresholdAngle,
                tuning: tuning,
-               fadeIn: Self.fadeInDuration
+               fadeIn: pictureFadeIn
            ) {
             startDisplayLink()
             if let frame = streamer.newFrame() {
@@ -587,10 +745,17 @@ final class LidController: ObservableObject {
             on: screen,
             startAngle: preferences.thresholdAngle,
             tuning: tuning,
-            fadeIn: Self.fadeInDuration
+            fadeIn: pictureFadeIn
         )
         // The link belongs to the overlay window.
         startDisplayLink()
+    }
+
+    private var pictureFadeIn: TimeInterval {
+        guard let reveal else { return Self.fadeInDuration }
+        // The lock screen is only just lighting up, so there is no sharp
+        // picture underneath to flash.
+        return reveal.lockScreenImage == nil ? Self.revealFadeInDuration : Self.fadeInDuration
     }
 
     private func blurProgress(for angle: Double) -> Double {
@@ -675,6 +840,16 @@ final class LidController: ObservableObject {
         workspace.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.resume() }
         }
+        workspace.addObserver(forName: NSWorkspace.screensDidWakeNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.revealIfPending() }
+        }
+        DistributedNotificationCenter.default().addObserver(
+            forName: Notification.Name("com.apple.screenIsUnlocked"),
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.revealIfPending() }
+        }
         NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
             object: nil,
@@ -707,7 +882,67 @@ final class LidController: ObservableObject {
     private func suspend() {
         Diagnostics.lid.notice("suspend")
         isSuspended = true
+        // A shut lid can read just under 360 rather than 0.
+        let shutAngle = rawAngle > 270 ? 0 : rawAngle
+        sleptWithLidShut = shutAngle < preferences.thresholdAngle
+        Diagnostics.lid.notice(
+            "suspend at \(self.rawAngle, format: .fixed(precision: 2)), lid shut \(self.sleptWithLidShut)"
+        )
+        isRevealPending = false
         stopEffectAndCapture()
+        if sleptWithLidShut { armLockScreenReveal() }
+    }
+
+    /// Puts the fully blurred wallpaper up on the lock screen before the
+    /// machine sleeps, so the first frame after waking is already covered
+    /// instead of showing the lock screen and then the effect.
+    private func armLockScreenReveal() {
+        guard preferences.isEnabled, preferences.playsOnOpen, LockScreenSpace.shared.isAvailable,
+              let image = wallpaperImage, let screen = NSScreen.builtIn else { return }
+        let now = CACurrentMediaTime()
+        let run = RevealRun(
+            requestedAt: now,
+            startedAt: now,
+            shut: max(preferences.thresholdAngle - preferences.blurSpan, 5),
+            open: preferences.thresholdAngle,
+            lockScreenImage: image
+        )
+        overlay.show(
+            image: image,
+            on: screen,
+            startAngle: preferences.thresholdAngle,
+            tuning: tuning,
+            fadeIn: 0,
+            onLockScreen: true,
+            initialAngle: run.shut,
+            initialProgress: blurProgress(for: run.shut),
+            synchronous: true
+        )
+        guard overlay.isPictureReady else {
+            Diagnostics.lid.notice("reveal: could not arm, no picture")
+            overlay.dismiss(animated: false)
+            return
+        }
+        reveal = run
+        rawAngle = run.shut
+        visualAngle.reset(to: run.shut)
+        isActive = true
+        startedAt = now
+        Diagnostics.lid.notice("reveal: armed on the lock screen")
+    }
+
+    /// Starts a reveal armed before sleep. The picture is already up, so it
+    /// holds fully blurred while the display lights, then clears.
+    private func startArmedReveal() -> Bool {
+        guard var run = reveal else { return false }
+        let now = CACurrentMediaTime()
+        run.requestedAt = now
+        run.startedAt = now + Self.revealWakeDelay
+        reveal = run
+        startDisplayLink()
+        setPollInterval(Self.activePollInterval)
+        Diagnostics.lid.notice("reveal: armed reveal starts")
+        return true
     }
 
     private func resume() {
@@ -725,10 +960,23 @@ final class LidController: ObservableObject {
         timeoutAwaitingRelease = false
         wasTimeoutEnabled = false
         isClosingOut = false
+        if startArmedReveal() {
+            isRevealPending = false
+            sleptWithLidShut = false
+            return
+        }
         if let angle = sensor.angle() {
             rawAngle = angle
             visualAngle.reset(to: angle)
         }
         setPollInterval(Self.idlePollInterval)
+        isRevealPending = sleptWithLidShut && preferences.playsOnOpen
+        sleptWithLidShut = false
+        Diagnostics.lid.notice("resume: reveal pending \(self.isRevealPending)")
+        if isRevealPending {
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.revealWakeDelay) { [weak self] in
+                MainActor.assumeIsolated { self?.revealIfPending() }
+            }
+        }
     }
 }

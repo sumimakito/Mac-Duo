@@ -36,3 +36,5 @@
 "Language" = "语言";
 "System" = "跟随系统";
 "Chinese (Simplified)" = "简体中文";
+"Play on open" = "开盖时播放";
+"Clears the effect after the lid opens from sleep." = "从睡眠中打开屏幕后播放消散效果。";

@@ -194,7 +194,11 @@ final class DepthOverlay {
         on screen: NSScreen,
         startAngle: Double,
         tuning: DepthTuning,
-        fadeIn: TimeInterval
+        fadeIn: TimeInterval,
+        onLockScreen: Bool = false,
+        initialAngle: Double? = nil,
+        initialProgress: Double = 0,
+        synchronous: Bool = false
     ) {
         dismiss(animated: false)
         // The screenshot's screen can be stale once the lid shuts into
@@ -210,12 +214,21 @@ final class DepthOverlay {
             ? Double(image.width) / Double(screen.frame.width)
             : Double(screen.backingScaleFactor)
 
-        makeWindow(on: screen, pixelScale: pixelScale)
+        makeWindow(on: screen, pixelScale: pixelScale, onLockScreen: onLockScreen)
         guard let window else { return }
 
         buildToken += 1
         let token = buildToken
         let size = screenSize
+        // Armed just before sleep, the picture has to be in place before the
+        // machine stops, so it is built here rather than on the queue.
+        if synchronous {
+            guard let picture = renderer.makePicture(image: image, screenSize: size, pixelScale: CGFloat(pixelScale)) else { return }
+            renderer.adopt(picture)
+            update(progress: initialProgress, currentAngle: initialAngle ?? startAngle, tuning: tuning)
+            reveal()
+            return
+        }
         buildQueue.async { [weak self, weak renderer] in
             guard let renderer else { return }
             let picture = renderer.makePicture(image: image, screenSize: size, pixelScale: CGFloat(pixelScale))
@@ -231,7 +244,7 @@ final class DepthOverlay {
         }
     }
 
-    private func makeWindow(on screen: NSScreen, pixelScale: Double) {
+    private func makeWindow(on screen: NSScreen, pixelScale: Double, onLockScreen: Bool = false) {
         guard let renderer else { return }
         let view = MetalHostView(layer: renderer.makeLayer(), scale: CGFloat(pixelScale))
         view.frame = NSRect(origin: .zero, size: screenSize)
@@ -254,6 +267,8 @@ final class DepthOverlay {
         window.setFrame(screen.frame, display: false)
         window.alphaValue = 0
         window.orderFrontRegardless()
+        // After ordering in, so the window has a number to hand over.
+        if onLockScreen { LockScreenSpace.shared.adopt(window) }
         hasRevealed = false
         self.window = window
     }

@@ -102,6 +102,12 @@ struct SettingsView: View {
                 help: localized("Off holds the frame from when the effect started.")
             )
             .disabled(!preferences.isEnabled)
+            toggleRow(
+                localized("Play on open"),
+                isOn: $preferences.playsOnOpen,
+                help: localized("Clears the effect after the lid opens from sleep.")
+            )
+            .disabled(!preferences.isEnabled)
         }
     }
 
